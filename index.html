@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0e0f10">
+<title>meander · norns</title>
+<style>
+:root {
+  --bg: #0e0f10; --text: #e8e6e1; --muted: #8f8c86; --accent: #f2b35c; --line: #2b2e32;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-code: ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: radial-gradient(120% 80% at 50% 0%, #1a1b1e 0%, var(--bg) 60%); color: var(--text); font: 15px/1.45 var(--font-ui); }
+body { overflow: hidden; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+/* the page is always laid out in landscape. Held upright, the whole stage turns
+   90° so turning the phone sideways shows it the right way up (iOS can't lock it) */
+#app { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; width: 100dvw; height: 100dvh; container-type: size;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  padding: 10px max(14px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
+@media (orientation: portrait) {
+  #app { width: 100vh; height: 100vw; width: 100dvh; height: 100dvw; left: 100vw; left: 100dvw; transform: rotate(90deg); transform-origin: top left;
+    padding: 10px 18px; }
+}
+button { font: inherit; color: inherit; }
+
+/* the norns: an aluminium slab, screen beside three keys + three encoders */
+.norns { display: grid; grid-template-columns: auto auto; gap: 0 clamp(14px, 4cqw, 34px); align-items: center;
+  border-radius: 22px; padding: clamp(10px, 3.2cqh, 18px) clamp(14px, 3cqw, 24px) clamp(12px, 3.6cqh, 20px); position: relative;
+  background: linear-gradient(160deg, #46484d 0%, #2c2d31 45%, #232428 100%);
+  box-shadow: 0 1px 0 rgba(255,255,255,.12) inset, 0 -1px 0 rgba(0,0,0,.5) inset, 0 18px 40px rgba(0,0,0,.55); }
+.norns::before { content: ""; position: absolute; inset: 7px; border-radius: 16px; border: 1px solid rgba(255,255,255,.05); pointer-events: none; }
+.brand { grid-column: 1 / -1; font: 600 11px/1 var(--font-code); letter-spacing: .28em; color: rgba(255,255,255,.32); margin: 0 0 clamp(6px, 2cqh, 12px) 4px; }
+.screen { background: #000; border-radius: 6px; padding: 7px; box-shadow: inset 0 0 0 2px #0b0b0c, 0 1px 0 rgba(255,255,255,.08); }
+/* as wide as fits: half the stage's width, and no taller than the stage allows */
+#cv { display: block; width: min(56cqw, (100cqh - 150px) * 2, 640px); aspect-ratio: 2 / 1; image-rendering: pixelated; }
+.controls { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(4px, 2cqh, 14px) clamp(10px, 3cqw, 24px); justify-items: center; align-items: center; }
+.ctl { display: grid; justify-items: center; gap: 4px; touch-action: none; cursor: pointer; }
+.ctl span { font: 500 10px/1 var(--font-code); color: rgba(255,255,255,.45); letter-spacing: .08em; }
+.key i { display: block; width: clamp(32px, 11cqh, 48px); height: clamp(32px, 11cqh, 48px); border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #55575c, #1c1d20 75%);
+  box-shadow: inset 0 0 0 3px #121315, 0 2px 3px rgba(0,0,0,.5); transition: transform .05s; }
+.key.down i { transform: scale(.92); background: radial-gradient(circle at 40% 35%, #3d3f43, #141517 75%); box-shadow: inset 0 0 0 3px #0c0c0d, 0 0 0 2px rgba(242,179,92,.55); }
+.knob i { display: block; width: clamp(46px, 17cqh, 78px); height: clamp(46px, 17cqh, 78px); border-radius: 50%; position: relative;
+  background: radial-gradient(circle at 35% 30%, #6a6d73, #2a2c30 62%, #1d1e21 100%);
+  box-shadow: 0 4px 10px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.18); }
+.knob i::after { content: ""; position: absolute; top: 12%; left: 50%; width: 3px; height: 20%; margin-left: -1.5px; border-radius: 2px; background: #e9e7e2; }
+.knob.turning i { box-shadow: 0 4px 10px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.18), 0 0 0 2px rgba(242,179,92,.55); }
+/* real norns order: K1 E1 / E2 E3 / K2 K3 */
+
+.bar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; align-items: center; }
+.pill { border: 1px solid var(--line); background: #17181b; border-radius: 999px; padding: 6px 13px; font-size: 12px; color: var(--text); }
+.pill[aria-pressed="true"] { border-color: rgba(242,179,92,.6); color: var(--accent); }
+.help { text-align: center; color: var(--muted); font-size: 12px; margin: 0; }
+.help b { color: var(--text); font-weight: 600; }
+
+/* first tap: iOS only lets a page make sound after a tap */
+.start { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; background: rgba(8,8,9,.82); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); padding: 24px; }
+.start div { max-width: 380px; text-align: center; }
+.start h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: .01em; }
+.start p { color: var(--muted); margin: 0 0 18px; font-size: 14px; }
+.start button { background: var(--accent); color: #1a1206; border: 0; border-radius: 999px; padding: 13px 28px; font-weight: 600; font-size: 16px; }
+.start .quiet { display: block; margin: 14px auto 0; background: none; color: var(--muted); font-weight: 400; font-size: 13px; padding: 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+<div class="norns" role="group" aria-label="norns">
+  <p class="brand">norns · meander</p>
+  <div class="screen"><canvas id="cv" width="768" height="384" aria-label="norns screen"></canvas></div>
+  <div class="controls">
+    <div class="ctl key" id="k1" data-key="1" role="button" aria-label="K1"><i></i><span>K1</span></div>
+    <div class="ctl knob" id="e1" data-enc="1" role="slider" aria-label="E1"><i></i><span>E1</span></div>
+    <div class="ctl knob" id="e2" data-enc="2" role="slider" aria-label="E2"><i></i><span>E2</span></div>
+    <div class="ctl knob" id="e3" data-enc="3" role="slider" aria-label="E3"><i></i><span>E3</span></div>
+    <div class="ctl key" id="k2" data-key="2" role="button" aria-label="K2"><i></i><span>K2</span></div>
+    <div class="ctl key" id="k3" data-key="3" role="button" aria-label="K3"><i></i><span>K3</span></div>
+  </div>
+</div>
+<div class="bar">
+  <button class="pill" id="btnSound" aria-pressed="true">Sound on</button>
+  <button class="pill" id="btnSpeed" aria-pressed="false">Speed 1×</button>
+  <p class="help" id="help"></p>
+</div>
+
+<div class="start" id="start">
+  <div>
+    <h1>meander</h1>
+    <p>A playable norns running the meander script. Hold your phone sideways. Turn up your volume; sound plays even with the silent switch on.</p>
+    <button id="btnStart">Tap to start</button>
+    <button class="quiet" id="btnQuiet">Start without sound</button>
+  </div>
+</div>
+</div>
+
+<script>
+const W = 128, H = 64;
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const now = () => performance.now() / 1000;
+const toast = () => {};
+let sim = null;
+const state = { norns: [] };
+
+/* ===== shared from NornsDesigner: screen raster ===== */
+function bres(x0, y0, x1, y1, plot) {
+  let dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1, dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1, err = dx + dy;
+  for (;;) { plot(x0, y0); if (x0 === x1 && y0 === y1) break; const e2 = 2 * err; if (e2 >= dy) { err += dy; x0 += sx; } if (e2 <= dx) { err += dx; y0 += sy; } }
+}
+function circlePts(cx, cy, r, fill, plot) {
+  if (r <= 0) { plot(cx, cy); return; }
+  const hl = (a, b, y) => { for (let x = a; x <= b; x++) plot(x, y); };
+  let x = r, y = 0, err = 1 - r;
+  while (x >= y) {
+    if (fill) { hl(cx - x, cx + x, cy + y); hl(cx - x, cx + x, cy - y); hl(cx - y, cx + y, cy + x); hl(cx - y, cx + y, cy - x); }
+    else { [[x,y],[y,x],[-y,x],[-x,y],[-x,-y],[-y,-x],[y,-x],[x,-y]].forEach(([a,b]) => plot(cx + a, cy + b)); }
+    y++;
+    if (err < 0) err += 2 * y + 1; else { x--; err += 2 * (y - x) + 1; }
+  }
+}
+const GLYPHS = {
+"A":["010","101","111","101","101"],"B":["110","101","110","101","110"],"C":["011","100","100","100","011"],"D":["110","101","101","101","110"],
+"E":["111","100","110","100","111"],"F":["111","100","110","100","100"],"G":["011","100","101","101","011"],"H":["101","101","111","101","101"],
+"I":["111","010","010","010","111"],"J":["001","001","001","101","010"],"K":["101","101","110","101","101"],"L":["100","100","100","100","111"],
+"M":["10001","11011","10101","10001","10001"],"N":["1001","1101","1011","1001","1001"],"O":["010","101","101","101","010"],"P":["110","101","110","100","100"],
+"Q":["010","101","101","110","011"],"R":["110","101","110","101","101"],"S":["011","100","010","001","110"],"T":["111","010","010","010","010"],
+"U":["101","101","101","101","111"],"V":["101","101","101","101","010"],"W":["10001","10001","10101","11011","10001"],"X":["101","101","010","101","101"],
+"Y":["101","101","010","010","010"],"Z":["111","001","010","100","111"],
+"0":["111","101","101","101","111"],"1":["01","11","01","01","01"],"2":["110","001","010","100","111"],"3":["110","001","010","001","110"],
+"4":["101","101","111","001","001"],"5":["111","100","110","001","110"],"6":["011","100","111","101","111"],"7":["111","001","010","010","010"],
+"8":["111","101","111","101","111"],"9":["111","101","111","001","110"],
+" ":["00","00","00","00","00"],".":["0","0","0","0","1"],",":["0","0","0","1","1"],":":["0","1","0","1","0"],";":["0","1","0","1","1"],
+"!":["1","1","1","0","1"],"?":["110","001","010","000","010"],"-":["000","000","111","000","000"],"+":["000","010","111","010","000"],
+"=":["000","111","000","111","000"],"/":["001","001","010","100","100"],"%":["101","001","010","100","101"],"(":["01","10","10","10","01"],
+")":["10","01","01","01","10"],"[":["11","10","10","10","11"],"]":["11","01","01","01","11"],"<":["001","010","100","010","001"],
+">":["100","010","001","010","100"],"'":["1","1","0","0","0"],"\"":["101","101","000","000","000"],"#":["101","111","101","111","101"],
+"*":["000","101","010","101","000"],"_":["000","000","000","000","111"],"|":["1","1","1","1","1"],"&":["010","101","010","101","011"],
+"@":["111","101","111","100","111"],"^":["010","101","000","000","000"],"~":["000","011","110","000","000"],"$":["011","110","010","011","110"]
+};
+function glyph(ch) { return GLYPHS[ch] || GLYPHS[ch.toUpperCase()] || GLYPHS["?"]; }
+function textWidth(str, k) { let w = 0; for (const ch of str) w += (glyph(ch)[0].length + 1) * k; return Math.max(0, w - k); }
+function textPixels(o) {
+  const k = Math.max(1, Math.round((o.size || 8) / 8)), str = String(o.text), pts = [];
+  const tw = textWidth(str, k);
+  let x = o.x - (o.align === "center" ? Math.floor(tw / 2) : o.align === "right" ? tw : 0);
+  const top = o.y - 5 * k;
+  for (const ch of str) {
+    const g = glyph(ch);
+    g.forEach((row, ry) => { for (let rx = 0; rx < row.length; rx++) if (row[rx] === "1") for (let a = 0; a < k; a++) for (let b = 0; b < k; b++) pts.push([x + rx * k + a, top + ry * k + b]); });
+    x += (g[0].length + 1) * k;
+  }
+  return pts;
+}
+function objPixels(o, plot) {
+  switch (o.type) {
+    case "pixels": o.pts.forEach(([x, y]) => plot(x, y)); break;
+    case "line": bres(o.x1, o.y1, o.x2, o.y2, plot); break;
+    case "rect":
+      for (let y = o.y; y < o.y + o.h; y++) for (let x = o.x; x < o.x + o.w; x++) {
+        if (o.fill || y === o.y || y === o.y + o.h - 1 || x === o.x || x === o.x + o.w - 1) plot(x, y);
+      }
+      break;
+    case "circle": circlePts(o.x, o.y, o.r, o.fill, plot); break;
+    case "text": textPixels(o).forEach(([x, y]) => plot(x, y)); break;
+  }
+}
+function rasterize(objs) {
+  const buf = new Uint8Array(W * H);
+  for (const o of objs || state.norns) objPixels(o, (x, y) => { if (x >= 0 && x < W && y >= 0 && y < H) buf[y * W + x] = o.level; });
+  return buf;
+}
+function bbox(o) {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  objPixels(o, (x, y) => { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; });
+  return x1 < x0 ? null : { x0, y0, x1, y1 };
+}
+function translate(o, dx, dy) {
+  switch (o.type) {
+    case "pixels": o.pts = o.pts.map(([x, y]) => [x + dx, y + dy]); break;
+    case "line": o.x1 += dx; o.x2 += dx; o.y1 += dy; o.y2 += dy; break;
+    default: o.x += dx; o.y += dy;
+  }
+}
+
+
+
+/* ===== shared from NornsDesigner: meander sound + logic ===== */
+/* meander: a JavaScript port of meander.lua's logic, on a simulated clock */
+let actx = null;
+function audioCtx() {
+  if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+  if (actx.state === "suspended") actx.resume().catch(() => {});
+  return actx;
+}
+/* preview effects: tempo-synced delay + generated reverb, both following the ladder.
+   melody -> dry + delay + reverb (the delay's echoes also feed the reverb)
+   kick   -> dry + reverb only */
+let fx = null, fxLastUpdate = 0;
+const FX_DELAY_BEATS = 0.75;   // dotted eighth
+function makeImpulse(a, seconds, decay) {
+  const len = Math.floor(a.sampleRate * seconds), pre = Math.floor(a.sampleRate * 0.02);
+  const buf = a.createBuffer(2, len, a.sampleRate);
+  for (let c = 0; c < 2; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = pre; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - (i - pre) / (len - pre), decay);
+  }
+  return buf;
+}
+function audioFx() {
+  const a = actx; if (!a) return null; if (fx) return fx;
+  const master = a.createGain(); master.gain.value = 0.85; master.connect(a.destination);
+  const verb = a.createConvolver(); verb.buffer = makeImpulse(a, 3.5, 3);
+  const verbOut = a.createGain(); verbOut.gain.value = 0.8; verb.connect(verbOut).connect(master);
+  const delay = a.createDelay(4), tone = a.createBiquadFilter(), fb = a.createGain();
+  tone.type = "lowpass"; tone.frequency.value = 2800;   // each echo a little darker
+  delay.connect(tone); tone.connect(fb); fb.connect(delay);
+  const delayOut = a.createGain(); delayOut.gain.value = 0.7; tone.connect(delayOut); delayOut.connect(master);
+  const delayToVerb = a.createGain(); delayToVerb.gain.value = 0.35; delayOut.connect(delayToVerb).connect(verb);
+  const mel = a.createGain(), kick = a.createGain(), melDelay = a.createGain(), melVerb = a.createGain(), kickVerb = a.createGain();
+  mel.connect(master); mel.connect(melDelay).connect(delay); mel.connect(melVerb).connect(verb);
+  kick.connect(master); kick.connect(kickVerb).connect(verb);
+  // the wind sound's low-pass sweep (rise 8 beats, hold 8, fall 8, hold 8), shared by all wind notes
+  const windLp = a.createBiquadFilter(); windLp.type = "lowpass"; windLp.frequency.value = 250; windLp.Q.value = 0.7; windLp.connect(mel);
+  // elements page volumes (engine.levels in meander.lua), applied before the delay and reverb
+  const melIn = a.createGain(), kickIn = a.createGain(), windIn = a.createGain();
+  melIn.connect(mel); kickIn.connect(kick); windIn.connect(windLp);
+  fx = { mel, kick, delay, fb, melDelay, melVerb, kickVerb, windLp, melIn, kickIn, windIn };
+  return fx;
+}
+// wind sweep amount 0..1 at a beat position: rise 8 beats, hold 8, fall 8, hold 8 (WIND_STEP in meander.lua)
+function windSweep(beats) {
+  const p = ((beats % 32) + 32) % 32;
+  return p < 8 ? p / 8 : p < 16 ? 1 : p < 24 ? 1 - (p - 16) / 8 : 0;
+}
+// lad01: ladder 0..1 (0 V..10 V). Wake is close and dry, Meander wide and echoing
+function updateFx(lad01, bpm, beats) {
+  if (!fx || !actx) return;
+  const t = actx.currentTime, k = 0.3;
+  // Air low: the sweep runs at half speed (16-beat steps, a 64-beat cycle)
+  if (beats != null) fx.windLp.frequency.setTargetAtTime(250 * Math.pow(24, windSweep(sim && sim.el[3] === 2 ? beats / 2 : beats)), t, 0.06);
+  fx.delay.delayTime.setTargetAtTime(FX_DELAY_BEATS * 60 / bpm, t, 0.05);
+  fx.melDelay.gain.setTargetAtTime(0.08 + 0.5 * lad01, t, k);
+  fx.fb.gain.setTargetAtTime(0.15 + 0.5 * lad01, t, k);       // repeats: up to 0.65 feedback
+  fx.melVerb.gain.setTargetAtTime(0.1 + 0.6 * lad01, t, k);
+  fx.kickVerb.gain.setTargetAtTime(0.05 + 0.4 * lad01, t, k);
+}
+// browser versions of the norns engine's melody sounds (lib/Engine_MeanderVoices.sc).
+// vel and bright are 0..1; bright follows the ladder
+// elements page (ELEMENTS in meander.lua): each off / low / medium / high, all start high.
+// They pick what plays; the mix is fixed (melody 1, drums 0.5, wind 1).
+// Fire: whose notes each section plays (off: own notes, one per bar)
+// Earth: drum. Water: melody sound. Air: wind (low/medium an unpitched bed, low with a half-speed sweep)
+const M_ELEMENTS = [
+  ["fire", ["1 per bar, wake notes", "wake rhythm", "wake nourish wake rhythm", "each its own"]],
+  ["earth", ["no drum", "wood block", "conga", "kick"]],
+  ["water", ["no melody", "soft pad", "bowl", "piano"]],
+  ["air", ["no wind", "airy shh, slow sweep", "airy shh", "pitched wind"]]];
+const M_LEVELS = ["off", "low", "medium", "high"], M_SHORT = ["OFF", "LOW", "MED", "HIGH"], M_LEDS = [2, 6, 10, 15];
+// per Fire level (off, low, medium, high): whose rhythm and whose notes sections 1-3 play (FIRE_RHYTHMS / FIRE_NOTES)
+const M_FIRE_RHYTHMS = [null, [0, 0, 0], [0, 1, 0], [0, 1, 2]];   // off: M_EVERY_BAR
+const M_FIRE_NOTES = [[0, 0, 0], [0, 1, 2], [0, 1, 2], [0, 1, 2]];
+const M_FIRE_DRUMS = [[0, 0, 1], [0, 1, 1], [0, 1, 2], [1, 1, 2]];   // whose drum pattern (0 = Wake's, none): off and low = Meander plays Nourish's (beat 1), off = no drum in Nourish; high = Wake plays Nourish's
+const M_EVERY_BAR = { hits: 1, steps: 1, div: 4, rotate: 0 };   // Fire off: one note per bar, on beat 1
+const M_EARTH_DRUMS = [null, "block", "conga", "kick"];
+const M_WATER_SOUNDS = [null, "soft pad", "bowl", "piano"];
+function applyLevels() {   // fixed mix (fixed_levels in meander.lua)
+  if (!fx || !actx) return;
+  const t = actx.currentTime;
+  fx.melIn.gain.setTargetAtTime(1, t, 0.05); fx.kickIn.gain.setTargetAtTime(0.5, t, 0.05); fx.windIn.gain.setTargetAtTime(1, t, 0.05);
+}
+const liveVoices = [];   // like the engine: past 8 ringing notes, the oldest is released
+let noiseBuf = null;
+function noise(a) {
+  if (!noiseBuf || noiseBuf.sampleRate !== a.sampleRate) {
+    noiseBuf = a.createBuffer(1, a.sampleRate * 2, a.sampleRate);
+    const d = noiseBuf.getChannelData(0); let b = 0;
+    for (let i = 0; i < d.length; i++) { const w = Math.random() * 2 - 1; b = 0.97 * b + 0.03 * w * 6; d[i] = (w * 0.4 + b * 0.6); }   // white + a little pink
+  }
+  const n = a.createBufferSource(); n.buffer = noiseBuf; n.loop = true; return n;
+}
+function playMelody(kind, hz, vel, bright, when) {
+  const a = actx; if (!a || a.state !== "running") return;
+  const t = Math.max(a.currentTime, when || 0);
+  const out = a.createGain(), pan = a.createStereoPanner();
+  pan.pan.value = Math.random() * 0.6 - 0.3;
+  out.connect(pan).connect(fx ? (kind === "wind" || kind === "shh" ? fx.windIn : fx.melIn) : a.destination);
+  const srcs = [], osc = (type, f) => { const o = a.createOscillator(); o.type = type; o.frequency.value = f; srcs.push(o); return o; };
+  const env = (g, pts) => { g.gain.setValueAtTime(0, t); pts.forEach(([dt, v, kind]) => kind === "exp" ? g.gain.exponentialRampToValueAtTime(Math.max(v, 0.0001), t + dt) : g.gain.linearRampToValueAtTime(v, t + dt)); };
+  let dur;
+  if (kind === "piano") {
+    const dec = 3.5 * clamp(220 / hz, 0.5, 2), ratios = [1, 2.003, 3.009, 4.02, 5.04], amps = [1, 0.5, 0.28, 0.14, 0.08], decs = [1, 0.6, 0.4, 0.28, 0.2];
+    const lp = a.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = Math.min(14000, 2000 + 8000 * bright); lp.connect(out);
+    ratios.forEach((r, i) => {
+      const g = a.createGain(); env(g, [[0.002, amps[i] * (1 + vel * [0, 0.4, 0.7, 1, 1.2][i]) * 0.25 * (0.35 + 0.5 * vel)], [dec * decs[i], 0, "exp"]]);
+      osc("sine", hz * r).connect(g).connect(lp);
+    });
+    const n = noise(a), ng = a.createGain(); env(ng, [[0.001, 0.12 * vel], [0.03, 0, "exp"]]); n.connect(ng).connect(lp); srcs.push(n);
+    dur = dec + 0.1;
+  } else if (kind === "pluck") {
+    const f = a.createBiquadFilter(), g = a.createGain(), ring = 1.2 + 1.6 * bright;
+    f.type = "lowpass"; f.Q.value = 1.5;
+    f.frequency.setValueAtTime(Math.min(16000, 1500 + 6000 * bright + 3000 * vel), t); f.frequency.exponentialRampToValueAtTime(Math.max(200, hz * 1.2), t + ring * 0.6);
+    env(g, [[0.002, 0.16 * (0.5 + 0.6 * vel)], [ring, 0, "exp"]]);
+    osc("sawtooth", hz).connect(f).connect(g).connect(out); dur = ring + 0.05;
+  } else if (kind === "soft pad") {
+    const f = a.createBiquadFilter(), g = a.createGain(), lfo = osc("sine", 0.1), lfoAmt = a.createGain(), cut = 400 + 1400 * bright;
+    f.type = "lowpass"; f.frequency.value = cut; lfoAmt.gain.value = cut * 0.15; lfo.connect(lfoAmt).connect(f.frequency);
+    [[-0.07, "triangle", 0.35], [0.07, "triangle", 0.35]].forEach(([c, ty, v]) => { const og = a.createGain(); og.gain.value = v; osc(ty, hz * Math.pow(2, c / 12)).connect(og).connect(f); });
+    [[0.5, 0.3], [2.001, 0.08]].forEach(([r, v]) => { const og = a.createGain(); og.gain.value = v; osc("sine", hz * r).connect(og).connect(f); });
+    const peak = 0.09 + 0.07 * vel;
+    env(g, [[2.5, peak], [3.5, peak], [8.5, 0]]);
+    f.connect(g).connect(out); dur = 8.6;
+  } else if (kind === "wind" || kind === "shh") {   // pitched gusts: very narrow resonance on the note + a faint whistle tone + an airy band
+    const shh = kind === "shh";   // Air low / medium: only the airy band, 12 dB up (mv_wind with whistleGain 0, toneGain 0, airGain 3.98)
+    const n = noise(a), bp = a.createBiquadFilter(), air = a.createBiquadFilter(), airLp = a.createBiquadFilter(), g = a.createGain(), mix = a.createGain(), lfo = osc("sine", 0.3 + Math.random() * 0.3), lfoAmt = a.createGain();
+    srcs.push(n);
+    bp.type = "bandpass"; bp.frequency.value = hz; bp.Q.value = 160;
+    lfoAmt.gain.value = hz * 0.008; lfo.connect(lfoAmt); lfoAmt.connect(bp.frequency);
+    const wg = a.createGain(); wg.gain.value = shh ? 0 : 12; n.connect(bp).connect(wg).connect(mix);
+    const tone = osc("sine", hz), tg = a.createGain(); tg.gain.value = shh ? 0 : 0.05; lfoAmt.connect(tone.frequency); tone.connect(tg).connect(mix);
+    air.type = "bandpass"; air.frequency.value = hz * 2; air.Q.value = 2; airLp.type = "lowpass"; airLp.frequency.value = 800 + 3000 * bright;
+    const ag = a.createGain(); ag.gain.value = 0.15 * (shh ? 3.98 : 1); const airDrift = a.createGain(); airDrift.gain.value = 2; lfoAmt.connect(airDrift).connect(air.frequency); n.connect(air).connect(airLp).connect(ag).connect(mix);
+    const peak = 0.65 + 0.75 * vel;
+    env(g, [[1.0, peak], [1.8, peak], [4.3, 0]]);
+    mix.connect(g).connect(out); dur = 4.4;
+  } else {   // bowl: two octaves down, in-key partials in beating pairs, long ring
+    const f = hz * 0.25, ratios = [1, 2, 3, 4], amps = [1, 0.5, 0.25 * (0.5 + bright), 0.12 * (0.3 + bright)], decs = [9, 6.5, 4.5, 3];   // in key: octave, fifth, 2 octaves
+    const level = 0.3 * (0.4 + 0.5 * vel) * 0.5;
+    ratios.forEach((r, i) => [0, 0.6].forEach(beat => {
+      const g = a.createGain(); env(g, [[0.01, amps[i] * level], [decs[i], 0, "exp"]]);
+      osc("sine", f * r + beat).connect(g).connect(out);
+    }));
+    const n = noise(a), lp = a.createBiquadFilter(), ng = a.createGain();
+    lp.type = "lowpass"; lp.frequency.value = f * 6; env(ng, [[0.001, 0.1 * vel], [0.03, 0, "exp"]]); n.connect(lp).connect(ng).connect(out); srcs.push(n);
+    dur = 9.5;
+  }
+  srcs.forEach(s => { s.start(t); s.stop(t + dur); });
+  liveVoices.push({ out, end: t + dur });
+  for (let i = liveVoices.length - 1; i >= 0; i--) if (liveVoices[i].end < a.currentTime) liveVoices.splice(i, 1);
+  while (liveVoices.length > 8) { const v = liveVoices.shift(); v.out.gain.setTargetAtTime(0, t, 0.2); }
+}
+const M_CONGA = 0.35;   // conga level, set to sit level with the kick
+const M_BLOCK = 0.30;   // wood block (knock) level: 25% above the kick's level, as in the engine
+// drums (mv_kick, mv_conga, mv_block). kind: "kick", "conga" (tuned to hz) or "block"
+function playDrum(kind, when, hz = 110, a = actx, dest) {
+  if (!a || (a.state !== "running" && !(window.OfflineAudioContext && a instanceof OfflineAudioContext))) return;
+  dest = dest || (fx ? fx.kickIn : a.destination);
+  const t = Math.max(a.currentTime, when || 0);
+  const tone = (type, f0, f1, bend, peak, dec) => {
+    const o = a.createOscillator(), g = a.createGain(); o.type = type;
+    o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + bend);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, t + dec);
+    o.connect(g).connect(dest); o.start(t); o.stop(t + dec + 0.02);
+  };
+  if (kind === "kick") tone("sine", 120, 45, 0.12, 0.5, 0.28);
+  else if (kind === "conga") {   // low conga open tone: a quick pitch drop, two membrane modes, a skin slap
+    tone("sine", hz * 1.12, hz, 0.03, M_CONGA, 0.45); tone("sine", hz * 1.59, 0, 0, M_CONGA * 0.35, 0.18); tone("sine", hz * 2.14, 0, 0, M_CONGA * 0.18, 0.1);
+    const n = noise(a), bp = a.createBiquadFilter(), g = a.createGain();
+    bp.type = "bandpass"; bp.frequency.value = 1800; bp.Q.value = 1.1; g.gain.setValueAtTime(M_CONGA * 0.6, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.02);
+    n.connect(bp).connect(g).connect(dest); n.start(t); n.stop(t + 0.03);
+  }
+  else {   // wood block: a low wooden knock, a dull click setting off a few low, damped modes
+    [[380, 0.05, 1], [820, 0.03, 0.45], [1450, 0.015, 0.2]].forEach(([f, dec, amp]) => tone("sine", f, 0, 0, M_BLOCK * amp, dec * 1.6));
+    const n = noise(a), lp = a.createBiquadFilter(), g = a.createGain();
+    lp.type = "lowpass"; lp.frequency.value = 2500; g.gain.setValueAtTime(M_BLOCK * 0.4, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.006);
+    n.connect(lp).connect(g).connect(dest); n.start(t); n.stop(t + 0.02);
+  }
+}
+const M_MINOR = [0, 3, 5, 7, 10], M_MAJOR = [0, 2, 4, 7, 9];
+const M_OUTRO_BARS = 8, M_OUTRO_HALF = 4;
+const M_SCALES = [["minor pent", M_MINOR], ["major pent", M_MAJOR], ["lydian", [0, 2, 4, 6, 7, 9, 11]], ["dorian", [0, 2, 3, 5, 7, 9, 10]], ["mixolydian", [0, 2, 4, 5, 7, 9, 10]], ["phrygian", [0, 1, 3, 5, 7, 8, 10]], ["ionian", [0, 2, 4, 5, 7, 9, 11]], ["aeolian", [0, 2, 3, 5, 7, 8, 10]], ["locrian", [0, 1, 3, 5, 6, 8, 10]]];
+const M_SECTIONS = [
+  { name: "Wake", scale: M_MINOR, sname: "minor pent", notes: [0, 3, 1, 5, 2, 4, 1, 3], seq: { hits: 5, steps: 8, div: 2, rotate: 0 }, vel: [3, 5], accent: 0, leap: 0, ladder: 1.5, bia: null },
+  { name: "Nourish", scale: M_MINOR, sname: "minor pent", notes: [2, 5, 3, 7, 1, 6, 4, 8], seq: { hits: 5, steps: 8, div: 1, rotate: 0 }, vel: [4, 7], accent: 1.5, leap: 0.1, ladder: 5, bia: { hits: 1, steps: 16, div: 1 / 4, rotate: 0 } },
+  { name: "Meander", scale: M_MINOR, sname: "minor pent", notes: [4, 7, 5, 9, 6, 10, 3, 8], seq: { hits: 5, steps: 8, div: 1 / 2, rotate: 0 }, vel: [5, 8.5], accent: 1.5, leap: 0.25, ladder: 10, bia: { hits: 2, steps: 16, div: 1 / 4, rotate: 0 } }
+];
+const mStepVolts = (d, sc) => { const oct = Math.floor(d / sc.length); return (sc[((d % sc.length) + sc.length) % sc.length] + 12 * oct) / 12; };
+const mEuclid = (hits, steps, rot) => Array.from({ length: steps }, (_, i) => (((i + (rot || 0)) % steps) * hits) % steps < hits);
+const mmss = (s) => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+const EX_MEANDER = {
+  id: "meander", focus: "norns",
+  desc: 'Three pages; <b>K3</b> steps visualizer → elements → setup. <b>K2</b> plays/stops (on the elements page it sets the selected element), hold <b>K1</b> + <b>K3</b> to test BIA. <b>Visualizer</b>: the timeline, undulating while the song plays, tallest at the current column. Each play rolls new melody rhythms and notes for every section. <b>Elements</b>: <b>E2</b> selects Fire, Earth, Water or Air and <b>K2</b> steps it high → medium → low → off and back; the grid\'s top-left four pads do the same. <b>Fire</b> picks the rhythm and notes (high: each section its own, and Wake gets a drum on beat 1; medium: Meander plays Wake\'s rhythm with its own notes; low: all play Wake\'s rhythm with their own notes, and Meander\'s drum on beat 1 only; off: one note per bar, all on Wake\'s notes, no drum in Nourish, and Meander\'s drum on beat 1 only). Wake\'s rhythm is Nourish\'s at half speed, which is Meander\'s at half speed. <b>Earth</b> the drum (kick, conga, wood block, none). <b>Water</b> the melody sound (piano, bowl, soft pad, none). <b>Air</b> the wind (pitched; only its airy shh; the shh with a half-speed sweep; none). <b>Setup</b>: <b>E1</b> song length (3–60 min), <b>E2</b> scale. Keys: <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> for K1–K3, <kbd>Q</kbd>/<kbd>W</kbd> E1, <kbd>A</kbd>/<kbd>S</kbd> E2, <kbd>Z</kbd>/<kbd>X</kbd> E3.',
+  src: "-- meander\n-- v0.1.0 @magargeetech\n-- llllllll.co/t/meander\n--\n-- Wake / Nourish / Meander:\n-- a 3-section piece for\n-- plucked Three Sisters and a\n-- BIA drum, conducted by norns\n-- through crow.\n--\n-- three pages, K3 steps:\n--   1 visualizer: the timeline\n--   2 elements: fire, earth,\n--     water, air\n--   3 setup: length, scale\n-- K2: play / stop\n--   (on elements: step level)\n-- K3: next page\n-- K1 + K3: test BIA (4 hits)\n-- on the elements page, each\n-- element is off / low /\n-- medium / high:\n--   E2: select an element\n--   K2: high, medium, low,\n--     off, low, medium ...\n--   grid row 1, pads 1-4:\n--     the same four buttons\n--   fire: melody rhythm and\n--     notes\n--   earth: drum sound\n--   water: melody sound\n--   air: wind\n-- on the setup page:\n--   E1: song length, 3-60 min\n--       (3 equal sections)\n--   E2: scale\n--\n-- crow out 1: melody pitch\n--   -> Three Sisters FREQ\n-- crow out 2: BIA trigger\n-- crow out 3: pluck strike\n--   (height = velocity)\n--   -> DXG ch1 STRIKE\n-- crow out 4: section ladder\n--   -> Lapsus in 1\n-- crow in 1: rising gate\n--   restarts the piece\n--\n-- grid bottom row: the piece's\n--   timeline. Wake dim, Nourish\n--   medium, Meander bright,\n--   sized by section length.\n--   The current column flashes\n--   at half the tempo\n--\n-- 4/4 at a fixed 96 bpm.\n-- the last 8 bars are an outro\n--   with no BIA: 4 bars of the\n--   Meander melody, then 4 bars\n--   of it at half time. Ladder\n--   stays at Meander's level\n--\n-- ported from meander-crow.lua,\n-- which runs on crow alone\n\n-- norns voice: melody sounds, kick, delay + reverb (lib/Engine_MeanderVoices.sc).\n-- Heard when PARAMS > sound is 'norns voice' or 'crow + norns'\nengine.name = 'MeanderVoices'\n\nlocal g = grid.connect()\n\n---------------------------------------------------------------\n-- the piece: same settings as meander-crow.lua\n---------------------------------------------------------------\nlocal BPM = 96    -- fixed tempo for the whole piece\nlocal BAR = 4     -- beats per bar: 4/4 = four quarter notes (8 eighths)\n-- elements page: four elements, each off / low / medium / high (all start high).\n-- They pick what plays, not how loud: the mix is fixed (see fixed_levels), and\n-- the ladder, delay and reverb behave the same whatever is chosen.\n-- Fire: the rhythm and notes each section's melody plays (see FIRE_RHYTHMS, FIRE_NOTES)\n--   off: one note per bar, on beat 1, in every section, all on Wake's notes;\n--        no drum in Nourish; Meander's drum on beat 1 of every bar\n--   low: every section plays Wake's rhythm, each with its own notes;\n--        Meander's drum plays Nourish's pattern (beat 1 of every bar)\n--   medium: Wake's, Nourish's, then Wake's rhythm again in Meander; each its own notes\n--   high: each section its own rhythm and notes: Wake, Nourish, Meander;\n--        Wake gets a drum on beat 1 of every bar, like Nourish\n-- Earth: the drum sound: off none, low wood block, medium conga, high kick\n-- Water: the melody sound: off none, low soft pad, medium singing bowl, high piano\n-- Air: the wind: off none; medium only the wind's airy \"shh\", an octave above\n--   the melody's notes; low the same with its filter sweep at half speed;\n--   high the full pitched wind on the melody's notes\nlocal ELEMENTS = {\n  { id = 'fire',  name = 'fire',  labels = {'1 per bar, wake notes', 'wake rhythm', 'wake nourish wake rhythm', 'each its own'} },\n  { id = 'earth', name = 'earth', labels = {'no drum', 'wood block', 'conga', 'kick'} },\n  { id = 'water', name = 'water', labels = {'no melody', 'soft pad', 'bowl', 'piano'} },\n  { id = 'air',   name = 'air',   labels = {'no wind', 'airy shh, slow sweep', 'airy shh', 'pitched wind'} },\n}\nlocal LEVEL_NAMES = {'off', 'low', 'medium', 'high'}\nlocal LEVEL_SHORT = {'OFF', 'LOW', 'MED', 'HIGH'}\nlocal LEVEL_LEDS = {2, 6, 10, 15}   -- button brightness: off (a faint glow so you can find it) .. high\nlocal DEFAULT_LEVEL = 4             -- every element starts at high\n-- Fire: for each level (off, low, medium, high), the section whose rhythm and\n-- whose notes sections 1, 2, 3 play. Fire off's rhythm is EVERY_BAR\nlocal FIRE_RHYTHMS = { nil,       {1, 1, 1}, {1, 2, 1}, {1, 2, 3} }\nlocal FIRE_NOTES   = { {1, 1, 1}, {1, 2, 3}, {1, 2, 3}, {1, 2, 3} }\nlocal EVERY_BAR = { hits = 1, steps = 1, div = 4, rotate = 0 }   -- Fire off: one note per bar, on beat 1\n-- Fire: for each level, whose drum pattern sections 1, 2, 3 play (1 = Wake's,\n-- which is none). Off and low: Meander plays Nourish's (beat 1 of every bar);\n-- off also silences Nourish's drum. High: Wake plays Nourish's too\nlocal FIRE_DRUMS   = { {1, 1, 2}, {1, 2, 2}, {1, 2, 3}, {2, 2, 3} }\n-- Earth: engine drum per level (1 kick, 2 conga, 3 wood block); nil = none\nlocal EARTH_DRUMS = { nil, 3, 2, 1 }\nlocal DRUM_AMP = 0.8\n-- Water: engine melody voice per level (1 piano, 2 pluck, 3 soft pad, 4 bowl); nil = none\nlocal WATER_VOICES = { nil, 3, 4, 1 }\nlocal element_sel = 1           -- the element E2 selects on the elements page\n\nlocal MINOR_PENT = {0, 3, 5, 7, 10}          -- earthy, open\nlocal MAJOR_PENT = {0, 2, 4, 7, 9}           -- bright, uplifting\nlocal LYDIAN     = {0, 2, 4, 6, 7, 9, 11}    -- floating, dreamy\nlocal DORIAN     = {0, 2, 3, 5, 7, 9, 10}    -- adventurous, hopeful\nlocal MIXOLYDIAN = {0, 2, 4, 5, 7, 9, 10}    -- bright, bluesy\nlocal PHRYGIAN   = {0, 1, 3, 5, 7, 8, 10}    -- dark, Spanish\nlocal IONIAN     = {0, 2, 4, 5, 7, 9, 11}    -- major: plain, happy\nlocal AEOLIAN    = {0, 2, 3, 5, 7, 8, 10}    -- natural minor: sad, earnest\nlocal LOCRIAN    = {0, 1, 3, 5, 6, 8, 10}    -- unstable, tense\n-- one scale for the whole piece: PARAMS > scale, or E2 on the setup page.\n-- Changing it applies to every section right away\nlocal SCALES = {\n  { name = 'minor pent', notes = MINOR_PENT },\n  { name = 'major pent', notes = MAJOR_PENT },\n  { name = 'lydian',     notes = LYDIAN },\n  { name = 'dorian',     notes = DORIAN },\n  { name = 'mixolydian', notes = MIXOLYDIAN },\n  { name = 'phrygian',   notes = PHRYGIAN },\n  { name = 'ionian',     notes = IONIAN },\n  { name = 'aeolian',    notes = AEOLIAN },\n  { name = 'locrian',    notes = LOCRIAN },\n}\nlocal SCALE      = MINOR_PENT   -- the current scale (set by the scale param)\nlocal SCALE_NAME = 'minor pent'\n\n-- len is in seconds; it is set from the PARAMS menu (minutes)\nlocal SECTIONS = {\n  { name = 'Wake',    len = 60, scale = MINOR_PENT,   -- len: set from the song length (E1)\n    notes = {0, 3, 1, 5, 2, 4, 1, 3},\n    low = 0, range = 6, seed = 11,\n    seq = { hits = 5, steps = 8, div = 2, rotate = 0 },     -- Nourish's rhythm at half speed (half notes, 4 bars). Rhythms and notes are re-rolled on every start\n    vel = {3, 5}, accent = 0, leap = 0,\n    ladder = 1.5, bia = nil },\n  { name = 'Nourish', len = 60, scale = MINOR_PENT,\n    notes = {2, 5, 3, 7, 1, 6, 4, 8},\n    low = 2, range = 7, seed = 23,\n    seq = { hits = 5, steps = 8, div = 1, rotate = 0 },     -- Meander's rhythm at half time (quarters, 2 bars)\n    vel = {4, 7}, accent = 1.5, leap = 0.1,\n    ladder = 5,\n    bia = { hits = 1, steps = 16, div = 1/4, rotate = 0 } },   -- beat 1 of every bar\n  { name = 'Meander', len = 60, scale = MINOR_PENT,\n    notes = {4, 7, 5, 9, 6, 10, 3, 8},\n    low = 4, range = 9, seed = 37,\n    seq = { hits = 5, steps = 8, div = 1/2, rotate = 0 },   -- 5 of 8 eighths\n    vel = {5, 8.5}, accent = 1.5, leap = 0.25,\n    ladder = 10,\n    bia = { hits = 2, steps = 16, div = 1/4, rotate = 0 } },   -- beats 1 and 3\n}\nlocal NOTES = 8   -- notes in an invented melody (when notes = nil)\n\n-- outro: the last OUTRO_BARS bars of the last section. BIA stops for all\n-- of them; for the final OUTRO_HALF_BARS the melody plays the same rhythm\n-- at half time (each step twice as long). The ladder is left as it is\nlocal OUTRO_BARS = 8        -- bars without the drum\nlocal OUTRO_HALF_BARS = 4   -- of those, the last bars at half time\n\n-- grid timeline on the bottom row: brightness of each section's columns\nlocal GRID_LEVELS = {3, 8, 13}   -- Wake low, Nourish medium, Meander high\nlocal GRID_FLASH = 15            -- brightness of the current column while lit\nlocal FLASH_RATE = 0.5           -- flashes per beat: 0.5 = one flash every 2 beats\n\n-- visualizer wave: the columns rise and fall in a wave that travels left to right\nlocal WAVE_RATE = 1 / 16         -- cycles per beat: 1/16 of the tempo (one wave every 16 beats)\nlocal WAVE_HEIGHT = 8            -- pixels up and down from the middle, at a 10 V ladder\nlocal VIS_COLS = 10              -- visualizer page: the timeline's segments on screen (the grid keeps its 16)\n-- which part each segment shows: 1-3 Wake, 4-6 Nourish, 7-9 Meander, 10 the outro\nlocal VIS_MAP = { 1, 1, 1, 2, 2, 2, 3, 3, 3, 'outro' }\nlocal OUTRO_LEVEL = 13           -- the outro segment's brightness when the outro starts: high, like Meander\nlocal WAVE_LENGTH = VIS_COLS     -- segments per wave (one wave across the screen)\nlocal wave_amp = 0               -- 0..1: eases in when the song plays, out when it stops\n-- the wave is tallest at the current column and tapers either side, coming to\n-- a point there, so only the current column reaches the full height\nlocal WAVE_SPREAD = 2.5          -- segments: the height drops to about a third this far away\nlocal wave_center = nil          -- the peak's column; glides to each new column\n\n-- wind sound: a low-pass filter sweep in time with the beat, repeating every\n-- 32 beats: rise 8 beats, hold open 8, fall 8, hold closed 8. Each rise starts\n-- on a 32-beat line, which is also the start of a visualizer wave cycle.\n-- With Air on low the sweep runs at half speed: 16-beat steps, a 64-beat cycle\nlocal WIND_STEP = 8              -- beats per step (doubled when Air is low)\nlocal WIND_STEPS = { 'rise', 'hold', 'fall', 'hold' }\n-- the wave's height also follows the ladder (0 V flat .. 10 V full height) and\n-- shrinks steadily to zero across the outro\nlocal outro_t0, outro_end = nil, nil   -- util.time() when the outro starts / the piece's last bar ends\n\n---------------------------------------------------------------\n-- state\n---------------------------------------------------------------\nlocal conductor = nil   -- clock running the whole piece\nlocal voices = {}       -- clocks playing the current section\nlocal now = 'stopped'   -- section name, 'ending', 'ended' or 'stopped'\nlocal playing = 0       -- index of the section playing (0 = none)\nlocal piece_t0 = 0      -- util.time() when the piece started\nlocal section_t0 = 0    -- util.time() when the current section started\nlocal k1_held = false\nlocal PAGES = {'visual', 'elements', 'setup'}   -- K3 steps through them\nlocal page = 'visual'\nlocal last_pitch = 0    -- volts on out 1\nlocal ladder = { from = 0, to = 0, t0 = 0, dur = 0 }  -- out 4, for the screen\nlocal flash = { pluck = 0, bia = 0, vel = 0 }\nlocal message, message_t = nil, 0   -- short note shown in the footer\n\nlocal function say(text)\n  print('meander: ' .. text)\n  message, message_t = text, util.time()\nend\n\n---------------------------------------------------------------\n-- outputs: crow, the norns voice, or both (PARAMS > sound)\n---------------------------------------------------------------\nlocal function use_crow() return params:get('sound') ~= 2 end\nlocal function use_norns() return params:get('sound') ~= 1 end\n\nlocal function ladder_now()\n  local t = util.time()\n  if ladder.dur <= 0 or t >= ladder.t0 + ladder.dur then return ladder.to end\n  return ladder.from + (ladder.to - ladder.from) * (t - ladder.t0) / ladder.dur\nend\n\nlocal function set_ladder(volts, slew)\n  ladder = { from = ladder_now(), to = volts, t0 = util.time(), dur = slew }\n  if use_crow() then\n    crow.output[4].slew = slew\n    crow.output[4].volts = volts\n  end\n  -- the norns voice's delay + reverb follow the ladder, gliding the same way\n  engine.space(volts / 10, slew)\nend\n\nlocal function set_pitch(volts)\n  last_pitch = volts\n  if use_crow() then crow.output[1].volts = volts end\nend\n\n-- one note: set the pitch on out 1 and strike out 3 (a 10 ms pulse whose\n-- height is the velocity). On crow this is ONE short message calling the\n-- mpluck helper (see setup_crow), so the pitch and the strike happen\n-- together, right on the beat\nlocal function note(volts, vel)\n  last_pitch = volts\n  vel = util.clamp(vel, 0.5, 10)\n  if use_crow() then crow(string.format(\"mpluck(%.4f,%.3f)\", volts, vel)) end\n  if use_norns() then\n    -- the ladder brightens the sound, like it opens Three Sisters' QUALITY\n    local hz = params:get('root_hz') * 2 ^ last_pitch\n    -- Water picks the melody sound (none when off)\n    if WATER_VOICES[params:get('water')] then engine.note(hz, vel / 10, ladder_now() / 10) end\n    -- Air: high plays pitched wind on the same note, low and medium only its airy \"shh\"\n    local air = params:get('air')\n    if air == 4 then engine.wind_note(hz, vel / 10, ladder_now() / 10)\n    elseif air > 1 then engine.wind_shh(hz, vel / 10, ladder_now() / 10) end\n  end\n  flash.pluck, flash.vel = util.time(), vel\nend\n\n-- one BIA trigger: 50 ms at 8 V on out 2 (one short message: mtrig)\nlocal function trig()\n  if use_crow() then crow(\"mtrig()\") end\n  if use_norns() then\n    -- Earth picks the drum sound (none when off). The conga is tuned to the root\n    local d = EARTH_DRUMS[params:get('earth')]\n    if d then engine.drum(d, DRUM_AMP, params:get('root_hz')) end\n  end\n  flash.bia = util.time()\nend\n\n---------------------------------------------------------------\n-- music\n---------------------------------------------------------------\n-- scale step -> volts (1 V per octave), in the given scale\nlocal function step_volts(d, sc)\n  sc = sc or SCALE\n  local oct = d // #sc\n  return (sc[d % #sc + 1] + 12 * oct) / 12\nend\n\nlocal function euclid(hits, steps, rotate)\n  local t = {}\n  for i = 0, steps - 1 do\n    local j = (i + (rotate or 0)) % steps\n    t[i + 1] = ((j * hits) % steps) < hits\n  end\n  return t\nend\n\n-- a new melody of NOTES scale steps in the section's register (low .. low + range).\n-- Each note leaps at least 2 steps from the one before\nlocal function invent_melody(s)\n  local m, prev = {}, nil\n  for i = 1, NOTES do\n    local d\n    repeat d = s.low + math.random(0, s.range)\n    until prev == nil or math.abs(d - prev) >= 2\n    m[i], prev = d, d\n  end\n  return m\nend\n\n-- the section's written melody, or an invented one that always leaps\nlocal function melody(s)\n  if s.notes then return s.notes end\n  math.randomseed(s.seed)\n  local m, prev = {}, nil\n  for i = 1, NOTES do\n    local d\n    repeat d = s.low + math.random(0, s.range)\n    until prev == nil or math.abs(d - prev) >= 2\n    m[i], prev = d, d\n  end\n  return m\nend\n\n-- the melody: a Euclidean rhythm, counted from the section's first bar line.\n-- idx is the section's number. Fire decides whose rhythm and notes it plays,\n-- read on every step, so a change is heard straight away, still in time.\n-- With Fire off it plays one note per bar, on beat 1. slow = 2 plays at half time (outro)\nlocal function rhythm_for(idx)\n  local r = FIRE_RHYTHMS[params:get('fire')]\n  return r and SECTIONS[r[idx]].seq or EVERY_BAR\nend\n\n-- every REROLL_BARS bars of a section, the notes it's playing are replaced\n-- with new ones (in their own section's register), so no melody repeats for\n-- longer than that. A section that starts on another section's notes (Fire off,\n-- low, medium) gets new ones at once, so they don't carry on from before\nlocal REROLL_BARS = 16\n\nlocal function voice(s, idx, slow)\n  local fresh = slow == nil      -- the section's own start (not the outro's half time)\n  slow = slow or 1\n  local t0 = clock.get_beats()   -- started on a bar line\n  local n = 1\n  local block = 0                -- which REROLL_BARS-bar block of the section we're in\n  if fresh and FIRE_NOTES[params:get('fire')][idx] ~= idx then block = -1 end   -- borrowed notes: new ones now\n  if use_crow() then crow.output[1].slew = 0 end\n  while true do\n    local q = rhythm_for(idx)\n    local div = q.div * slow\n    local pat = euclid(q.hits, q.steps or 8, q.rotate)\n    local k = math.floor((clock.get_beats() - t0) / div + 0.001)   -- steps since t0\n    local i = k % #pat + 1\n    if pat[i] then\n      local src = SECTIONS[FIRE_NOTES[params:get('fire')][idx]]\n      local b = math.floor((clock.get_beats() - t0) / BAR / REROLL_BARS + 0.001)\n      if b > block then   -- a new 16-bar block: new notes, starting from the first\n        block, n = b, 1\n        src.notes = invent_melody(src)\n        print('meander: new ' .. src.name .. ' notes after ' .. b * REROLL_BARS .. ' bars: ' .. table.concat(src.notes, ' '))\n      end\n      local mel = melody(src)\n      local v = params:get('octave') + step_volts(mel[(n - 1) % #mel + 1], s.scale)\n      if math.random() < s.leap then v = v + 1 end\n      n = n % #mel + 1\n      local vel = s.vel[1] + math.random() * (s.vel[2] - s.vel[1])\n      if i == 1 then vel = vel + (s.accent or 0) end\n      note(v, vel)\n    end\n    -- wait for the next step, counted from t0. Steps longer than a bar (Fire\n    -- off at half time) are waited out a bar at a time, so they stay on t0's grid\n    local nxt = t0 + (k + 1) * div\n    repeat clock.sync(math.min(div, BAR)) until clock.get_beats() >= nxt - 0.001\n  end\nend\n\n-- BIA: a Euclidean drum over the same bar\n-- the drum: a Euclidean pattern over the bar, on a 16-step grid of sixteenths.\n-- idx is the section's number; Fire decides whose drum pattern it plays\n-- (FIRE_DRUMS), read on every step, so a change stays in time. A section whose\n-- chosen pattern is none (Wake's) stays silent\nlocal DRUM_STEPS, DRUM_DIV = 16, 1/4\nlocal function bia(s, idx)\n  local i = 1\n  while true do\n    local d = SECTIONS[FIRE_DRUMS[params:get('fire')][idx]].bia\n    if d then\n      local pat = euclid(d.hits, d.steps, d.rotate)\n      if pat[(i - 1) % #pat + 1] then trig() end\n    end\n    i = i % DRUM_STEPS + 1\n    clock.sync(DRUM_DIV)\n  end\nend\n\nlocal function stop_voices()\n  for _, id in ipairs(voices) do clock.cancel(id) end\n  voices = {}\nend\n\n-- stop every note and glide the ladder to 0 V (closes QUALITY).\n-- out 1 holds its last note\nlocal function silence(fade)\n  stop_voices()\n  if use_crow() then\n    crow.output[2].volts = 0\n    crow.output[3].volts = 0\n  end\n  set_ladder(0, fade)\nend\n\n-- the outro: same notes, velocities and ladder as the section, Wake's rhythm,\n-- and no BIA\n-- the section at half time: same notes, velocities and rhythm, each step\n-- twice as long (eighths become quarters), and no drum\n\nlocal function piece()\n  piece_t0 = util.time()\n  -- each change happens on a bar line. The old voices are stopped a moment\n  -- before it (EDGE), so they can't also sound on the new part's first beat\n  local EDGE = clock.get_beat_sec() / 16\n  for n, s in ipairs(SECTIONS) do\n    stop_voices()\n    clock.sync(BAR)                   -- start each section on a bar line\n    if n == 1 then piece_t0 = util.time() end\n    now, playing, section_t0 = s.name, n, util.time()\n    say('section ' .. n .. ': ' .. s.name .. ' (' .. s.len .. ' s)')\n    set_ladder(s.ladder, params:get('ladder_rise'))\n    voices[#voices + 1] = clock.run(voice, s, n)\n    local bia_id = nil\n    bia_id = clock.run(bia, s, n); voices[#voices + 1] = bia_id   -- every section: Fire may give it a drum\n    if n == #SECTIONS then\n      local bar_s = BAR * clock.get_beat_sec()\n      local bars = math.floor(s.len / bar_s)\n      local outro_bars = math.min(OUTRO_BARS, bars)\n      local half_bars = math.min(OUTRO_HALF_BARS, outro_bars)\n      -- wait k bars, landing exactly on the bar line; before_line runs just before it\n      local function wait_bars(k, before_line)\n        if k <= 0 then return end\n        clock.sleep(k * bar_s - EDGE)        -- arrive just before the bar line...\n        if before_line then before_line() end\n        clock.sync(BAR)                      -- ...and land on it\n      end\n      -- outro part 1: the drum stops, the melody carries on unchanged\n      wait_bars(bars - outro_bars, function() if bia_id then clock.cancel(bia_id) end end)\n      outro_t0, outro_end = util.time(), section_t0 + s.len   -- the wave fades over this span\n      now = 'outro'\n      say('outro: no drum')\n      -- outro part 2: the melody at half time\n      wait_bars(outro_bars - half_bars, stop_voices)\n      voices[#voices + 1] = clock.run(voice, s, n, 2)   -- half time\n      say('outro: half time')\n      clock.sleep(math.max(0, s.len - (util.time() - section_t0) - EDGE))\n    else\n      clock.sleep(s.len - EDGE)\n    end\n  end\n  now, playing = 'ending', 0\n  say('fading to silence over ' .. params:get('end_fade') .. ' s')\n  silence(params:get('end_fade'))\n  clock.sleep(params:get('end_fade'))\n  set_pitch(0)\n  now = 'ended'\n  say('silent')\n  conductor = nil\nend\n\n-- a new melody rhythm and new notes for every section, each time the song\n-- starts. Rhythm: Meander gets 3-6 notes in 8 steps at a random rotation;\n-- Nourish plays it at half speed, and Wake at half Nourish's speed.\n-- Notes: 8 new ones per section, in its own register (low .. low + range), and\n-- new ones again every REROLL_BARS (16) bars of each section (see voice).\n-- The drum patterns don't change\nlocal RHYTHM = { hits = {3, 6}, steps = 8 }\nlocal function randomize_rhythms()\n  local m = { hits = math.random(RHYTHM.hits[1], RHYTHM.hits[2]), steps = RHYTHM.steps,\n              rotate = math.random(0, RHYTHM.steps - 1) }\n  local desc = {}\n  for _, s in ipairs(SECTIONS) do   -- one rhythm; each section keeps its own speed (div)\n    s.seq = { hits = m.hits, steps = m.steps, div = s.seq.div, rotate = m.rotate }\n    s.notes = invent_melody(s)\n    desc[#desc + 1] = s.name .. ' ' .. m.hits .. '/' .. m.steps .. ' r' .. m.rotate\n      .. ' notes ' .. table.concat(s.notes, ' ')\n  end\n  print('meander: ' .. table.concat(desc, '; '))\nend\n\nfunction start()\n  if conductor then clock.cancel(conductor); conductor = nil end\n  randomize_rhythms()\n  outro_t0, outro_end = nil, nil\n  stop_voices()\n  now = 'starting'\n  conductor = clock.run(piece)\nend\n\nfunction stop()\n  if conductor then clock.cancel(conductor); conductor = nil end\n  outro_t0, outro_end = nil, nil\n  silence(params:get('stop_fade'))\n  now, playing = 'stopped', 0\n  say('stopped')\nend\n\nfunction status() print('meander: ' .. now) end\n\nlocal function is_running() return conductor ~= nil end\n\n-- check BIA on its own: 4 drum hits\nfunction test_bia()\n  clock.run(function()\n    say('test BIA: 4 hits')\n    for k = 1, 4 do trig(); clock.sleep(0.5) end\n  end)\nend\n\n---------------------------------------------------------------\n-- the norns voice's mix: fixed (the elements pick sounds, not volumes).\n-- Melody and wind full, drums at half (the kick's level before the\n-- elements changed)\n---------------------------------------------------------------\nlocal function fixed_levels() engine.levels(1, 0.5, 1) end\n\n---------------------------------------------------------------\n-- crow setup (also runs when crow is plugged in later)\n---------------------------------------------------------------\nlocal function setup_crow()\n  -- helpers that live on crow: each note or drum hit is then one short\n  -- message instead of three, so it lands in time with the clock\n  crow(\"function mpluck(p, v) output[1].volts = p; output[3](pulse(0.01, v)) end\")\n  crow(\"function mtrig() output[2](pulse(0.05, 8)) end\")\n  for n = 1, 4 do crow.output[n].slew = 0; crow.output[n].volts = 0 end\n  crow.input[1].change = function() start() end\n  crow.input[1].mode(\"change\", 1.0, 0.1, \"rising\")\nend\n\n---------------------------------------------------------------\n-- init + params\n---------------------------------------------------------------\nfunction init()\n  math.randomseed(os.time())   -- once: each start then rolls different rhythms\n  params:add_separator('meander_sep', 'meander')\n  params:add_option('sound', 'sound', {'crow', 'norns voice', 'crow + norns'}, 1)\n  local names = {}\n  for i, sc in ipairs(SCALES) do names[i] = sc.name end\n  params:add_option('scale', 'scale (all sections)', names, 1)\n  params:set_action('scale', function(i)\n    SCALE, SCALE_NAME = SCALES[i].notes, SCALES[i].name\n    for _, s in ipairs(SECTIONS) do s.scale = SCALE end   -- every section follows\n  end)\n  -- song length: the three sections always split it equally\n  params:add_number('total_min', 'song length (min)', 3, 60, 3)\n  params:set_action('total_min', function(m)\n    for _, s in ipairs(SECTIONS) do s.len = m * 60 / #SECTIONS end\n  end)\n  for _, e in ipairs(ELEMENTS) do\n    params:add_option(e.id, e.name, LEVEL_NAMES, DEFAULT_LEVEL)\n  end\n  params:set_action('water', function(i) if WATER_VOICES[i] then engine.voice(WATER_VOICES[i]) end end)\n  params:add_number('octave', 'octave (V)', 0, 3, 1)\n  params:add_control('root_hz', 'norns voice root',\n    controlspec.new(40, 440, 'exp', 0, 110, 'hz'))\n  params:add_number('ladder_rise', 'ladder rise (s)', 0, 120, 20)\n  params:add_number('end_fade', 'end fade (s)', 0, 120, 20)\n  params:add_number('stop_fade', 'stop fade (s)', 0, 30, 3)\n  params:bang()\n\n  params:set('clock_tempo', BPM)\n  fixed_levels()\n  engine.delay_time(0.75 * 60 / BPM)   -- dotted eighth\n  engine.space(0, 0)\n  setup_crow()\n  crow.add = setup_crow\n\n  -- wind filter sweep: at each step line, start the next step. Steps are\n  -- WIND_STEP beats, or twice that with Air on low; a change is picked up at the\n  -- next step line, carrying on from the same point in the cycle\n  clock.run(function()\n    while true do\n      local st = params:get('air') == 2 and WIND_STEP * 2 or WIND_STEP\n      local pos = clock.get_beats() % (st * #WIND_STEPS)\n      if st - pos % st < 0.01 then pos = (pos + 0.01) % (st * #WIND_STEPS) end   -- right on a line\n      local step = math.floor(pos / st) + 1\n      local frac = (pos % st) / st\n      local left = (st - pos % st) * clock.get_beat_sec()\n      if WIND_STEPS[step] == 'rise' then engine.wind_filter(frac, 0); engine.wind_filter(1, left)\n      elseif WIND_STEPS[step] == 'fall' then engine.wind_filter(1 - frac, 0); engine.wind_filter(0, left)\n      else engine.wind_filter(step == 2 and 1 or 0, 0) end\n      clock.sync(st)\n    end\n  end)\n\n  clock.run(function()   -- redraw screen and grid at 15 fps\n    while true do clock.sleep(1 / 15); redraw(); grid_redraw() end\n  end)\n  say('ready: K2 to play')\nend\n\nfunction cleanup()\n  if conductor then clock.cancel(conductor) end\n  stop_voices()\n  for n = 1, 4 do crow.output[n].volts = 0 end\nend\n\n---------------------------------------------------------------\n-- controls\n---------------------------------------------------------------\n-- step an element to its next level, bouncing between the ends:\n-- high -> medium -> low -> off -> low -> medium -> high -> ...\nlocal element_dir = {}   -- per element: -1 stepping down, +1 stepping up\nlocal function cycle_element(i)\n  local e = ELEMENTS[i]\n  local v, d = params:get(e.id), element_dir[i] or -1\n  if v + d < 1 or v + d > #LEVEL_NAMES then d = -d end   -- turn round at off / high\n  element_dir[i] = d\n  params:set(e.id, v + d)\n  say(e.name .. ': ' .. e.labels[params:get(e.id)])\nend\n\ng.key = function(x, y, z)\n  if z == 1 and y == 1 and x >= 1 and x <= #ELEMENTS then cycle_element(x) end\nend\n\nfunction enc(n, d)\n  if page == 'elements' then\n    if n == 2 then element_sel = util.clamp(element_sel + d, 1, #ELEMENTS) end\n    return\n  end\n  if page ~= 'setup' then return end   -- encoders edit on the setup page\n  if n == 1 then\n    params:delta('total_min', d)\n  elseif n == 2 then\n    params:delta('scale', d)\n  end   -- E3: unused (Water picks the melody sound)\nend\n\nfunction key(n, z)\n  if n == 1 then k1_held = (z == 1) return end\n  if z == 0 then return end\n  if n == 2 then\n    if page == 'elements' then cycle_element(element_sel)\n    elseif is_running() then stop() else start() end\n  elseif n == 3 then\n    if k1_held then test_bia()\n    else\n      for i, p in ipairs(PAGES) do\n        if p == page then page = PAGES[i % #PAGES + 1]; break end\n      end\n    end\n  end\nend\n\n---------------------------------------------------------------\n-- screen\n---------------------------------------------------------------\nlocal function mmss(sec)\n  sec = math.max(0, math.floor(sec + 0.5))\n  return string.format('%d:%02d', sec // 60, sec % 60)\nend\n\nlocal function total_len()\n  local t = 0\n  for _, s in ipairs(SECTIONS) do t = t + s.len end\n  return t\nend\n\n---------------------------------------------------------------\n-- grid: the bottom row shows the piece's timeline\n---------------------------------------------------------------\n-- which section each column belongs to. Columns are shared out by\n-- section length (largest remainder), and every section gets at least 1\nlocal function section_columns(cols)\n  local total, counts, rem, used = total_len(), {}, {}, 0\n  for i, s in ipairs(SECTIONS) do\n    local exact = cols * s.len / total\n    counts[i] = math.max(1, math.floor(exact))\n    rem[i] = exact - math.floor(exact)\n    used = used + counts[i]\n  end\n  while used < cols do               -- leftover columns: largest remainders\n    local best = 1\n    for i = 2, #SECTIONS do if rem[i] > rem[best] then best = i end end\n    counts[best], rem[best], used = counts[best] + 1, -1, used + 1\n  end\n  while used > cols do               -- too many (very short sections): trim the longest\n    local big = 1\n    for i = 2, #SECTIONS do if counts[i] > counts[big] then big = i end end\n    counts[big], used = counts[big] - 1, used - 1\n  end\n  local map = {}\n  for i, c in ipairs(counts) do\n    for _ = 1, c do map[#map + 1] = i end\n  end\n  return map\nend\n\n-- the column for the current moment: it moves through the playing\n-- section's own columns, from the first column at the start of the piece\n-- to the last at the end\nlocal function playhead_column(map)\n  if playing == 0 then return nil end\n  local first, last = nil, nil\n  for x, i in ipairs(map) do\n    if i == playing then first = first or x; last = x end\n  end\n  local frac = (util.time() - section_t0) / SECTIONS[playing].len\n  return util.clamp(first + math.floor(frac * (last - first + 1)), first, last)\nend\n\nfunction grid_redraw()\n  local cols = (g.cols and g.cols > 0) and g.cols or 16\n  local row = (g.rows and g.rows > 0) and g.rows or 8\n  local map = section_columns(cols)\n  local now_col = playhead_column(map)\n  local period = 1 / FLASH_RATE                     -- beats per flash\n  local beat_on = (clock.get_beats() % period) < period / 2   -- lit for the first half\n  g:all(0)\n  for x = 1, cols do\n    local l = GRID_LEVELS[map[x]]\n    if x == now_col then l = beat_on and GRID_FLASH or 0 end\n    g:led(x, row, l)\n  end\n  -- the elements' buttons: row 1, pads 1-4 (fire, earth, water, air)\n  for i, e in ipairs(ELEMENTS) do g:led(i, 1, LEVEL_LEDS[params:get(e.id)]) end\n  g:refresh()\nend\n\nlocal function fade_level(t0, dur)\n  local age = util.time() - t0\n  if age > dur then return 1 end\n  return math.floor(15 - 13 * age / dur)\nend\n\n-- the visualizer's current segment (VIS_MAP): it moves through the playing\n-- section's three segments; Meander's three cover its time before the outro,\n-- and segment 10 is the outro itself\nlocal function playhead_segment()\n  if playing == 0 then return nil end\n  local first = (playing - 1) * 3 + 1\n  local len = SECTIONS[playing].len\n  if playing == #SECTIONS then\n    if outro_t0 then return VIS_COLS end\n    local bar_s = BAR * clock.get_beat_sec()\n    local bars = math.floor(len / bar_s)\n    len = (bars - math.min(OUTRO_BARS, bars)) * bar_s   -- Meander before the outro\n    if len <= 0 then return VIS_COLS end\n  end\n  local frac = (util.time() - section_t0) / len\n  return first + util.clamp(math.floor(frac * 3), 0, 2)\nend\n\n-- visualizer page: the piece's timeline, drawn large on the screen.\n-- VIS_COLS (10) segments (VIS_MAP): 1-3 Wake dim, 4-6 Nourish medium, 7-9 Meander\n-- bright, 10 the outro (dark until the outro, then flashing at high like Meander,\n-- fading to dark);\n-- the current segment flashes at half\n-- the tempo. While the song plays, the segments undulate in a wave at 1/16 of the\n-- tempo, travelling from left to right, tallest at the current segment and\n-- tapering away from it\nlocal function draw_visual()\n  local now_col = playhead_segment()\n  local beats = clock.get_beats()\n  -- the wave only moves while the song is playing; it eases in and settles flat.\n  -- Its height follows the ladder, and fades to zero across the outro\n  wave_amp = wave_amp + ((is_running() and 1 or 0) - wave_amp) * 0.1\n  local outro_fade = 1\n  if outro_t0 then\n    outro_fade = util.clamp((outro_end - util.time()) / math.max(0.001, outro_end - outro_t0), 0, 1)\n  end\n  local height = WAVE_HEIGHT * wave_amp * (ladder_now() / 10) * outro_fade\n  local period = 1 / FLASH_RATE\n  local beat_on = (beats % period) < period / 2\n  if now_col then\n    wave_center = wave_center and wave_center + (now_col - wave_center) * 0.1 or now_col\n  end\n  for x = 1, VIS_COLS do\n    local part = VIS_MAP[x]\n    local l = part == 'outro' and OUTRO_LEVEL or GRID_LEVELS[part]\n    if x == now_col then l = beat_on and GRID_FLASH or 0 end\n    -- the outro segment is dark until the outro starts; then it flashes at high,\n    -- fading steadily to dark by the song's end, with the wave\n    if part == 'outro' then\n      l = (outro_t0 and beat_on) and math.floor(OUTRO_LEVEL * outro_fade + 0.5) or 0\n    end\n    -- each segment is a little behind the one to its left, so the crest moves right\n    local phase = beats * WAVE_RATE - (x - 1) / WAVE_LENGTH\n    -- 1 at the current column, shrinking steadily with distance\n    local bell = wave_center and math.exp(-math.abs(x - wave_center) / WAVE_SPREAD) or 0\n    local dy = math.floor(height * bell * math.sin(2 * math.pi * phase) + 0.5)\n    -- segments share the 128-pixel width, with a 2-pixel gap between them\n    local left = math.floor((x - 1) * 128 / VIS_COLS + 0.5)\n    local right = math.floor(x * 128 / VIS_COLS + 0.5)\n    screen.level(l)\n    screen.rect(left + 1, 22 - dy, right - left - 2, 20)\n    screen.fill()\n  end\nend\n\n-- elements page: four buttons, lit off / low / medium / high; E2 selects, K2 steps\nlocal function draw_elements()\n  screen.aa(0)\n  screen.font_face(1)\n  screen.font_size(8)\n  screen.level(15)\n  screen.move(0, 7)\n  screen.text('ELEMENTS')\n  for i, e in ipairs(ELEMENTS) do\n    local x = (i - 1) * 32 + 6\n    local lvl = params:get(e.id)\n    screen.level(LEVEL_LEDS[lvl])\n    screen.rect(x, 14, 20, 20)\n    screen.fill()\n    if i == element_sel then\n      screen.level(15)\n      screen.rect(x - 2.5, 11.5, 25, 25)   -- selection frame\n      screen.stroke()\n    end\n    screen.level(i == element_sel and 15 or 6)\n    screen.move(x + 10, 46)\n    screen.text_center(string.upper(e.name))\n    screen.level(4)\n    screen.move(x + 10, 55)\n    screen.text_center(LEVEL_SHORT[lvl])\n  end\n  screen.level(3)\n  screen.move(0, 63)\n  if message and util.time() - message_t < 4 then\n    screen.text(string.upper(message))\n  else\n    screen.text('E2 SELECT  K2 SET  K3 PAGE')\n  end\nend\n\nfunction redraw()\n  screen.clear()\n  if page == 'visual' then\n    draw_visual()\n    screen.update()\n    return\n  elseif page == 'elements' then\n    draw_elements()\n    screen.update()\n    return\n  end\n  screen.aa(0)\n  screen.font_face(1)\n  screen.font_size(8)\n\n  -- header: title, state and elapsed time\n  screen.level(15)\n  screen.move(0, 7)\n  screen.text('MEANDER')\n  screen.move(128, 7)\n  if playing > 0 then\n    screen.text_right(string.upper(now) .. '  ' .. mmss(util.time() - piece_t0))\n  else\n    screen.level(4)\n    screen.text_right(string.upper(now))\n  end\n\n  -- timeline: one block per section, width = its length\n  local total, x = total_len(), 0\n  for i, s in ipairs(SECTIONS) do\n    local w = math.max(3, math.floor(128 * s.len / total + 0.5))\n    if i == #SECTIONS then w = 128 - x end\n    screen.level(i == playing and 10 or 3)\n    screen.rect(x + 1, 13, w - 2, 8)\n    screen.fill()\n    x = x + w\n  end\n  -- playhead\n  if playing > 0 then\n    local px = util.clamp(math.floor(128 * (util.time() - piece_t0) / total), 0, 127)\n    screen.level(15)\n    screen.rect(px, 10, 1, 14)\n    screen.fill()\n  end\n\n  -- the settings, one per encoder (E3 unused: Water picks the melody sound)\n  local rows = {\n    { 'LENGTH', params:get('total_min') .. ' MIN  ' .. mmss(SECTIONS[1].len) .. ' EACH' },\n    { 'SCALE', string.upper(SCALE_NAME) },\n  }\n  for i, r in ipairs(rows) do\n    local y = 22 + i * 8\n    screen.level(5)\n    screen.move(0, y)\n    screen.text('E' .. i .. ' ' .. r[1])\n    screen.level(15)\n    screen.move(128, y)\n    screen.text_right(r[2])\n  end\n\n  -- output activity: pitch, BIA, pluck, ladder\n  local meters = {\n    { 'PCH', util.clamp(math.floor(last_pitch * 3), 1, 15) },\n    { 'BIA', fade_level(flash.bia, 0.25) },\n    { 'PLK', math.min(fade_level(flash.pluck, 0.4), math.floor(flash.vel * 1.5)) },\n    { 'LAD', util.clamp(math.floor(ladder_now() * 1.5), 1, 15) },\n  }\n  for i, m in ipairs(meters) do\n    local mx = (i - 1) * 32\n    screen.level(math.max(1, m[2]))\n    screen.rect(mx, 49, 7, 6)\n    screen.fill()\n    screen.level(4)\n    screen.move(mx + 10, 55)\n    screen.text(m[1])\n  end\n\n  -- footer: last message for a few seconds, then key hints\n  screen.level(3)\n  screen.move(0, 63)\n  if message and util.time() - message_t < 4 then\n    screen.text(string.upper(message))\n  else\n    screen.text(is_running() and 'K2 STOP  K3 PAGE' or 'K2 PLAY  K3 PAGE')\n  end\n\n  screen.update()\nend\n",
+  init() {
+    return { t: 0, speed: 1, sound: true, running: false, phase: null, now: "stopped", playing: 0, totalMin: 3, bpm: 96, octave: 1, page: "visual", el: [4, 4, 4, 4], elSel: 0,
+      ladderRise: 20, endFade: 20, stopFade: 3, lens: [1, 1, 1], pitch: 0, ladder: { from: 0, to: 0, t0: 0, dur: 0 },
+      scaleIdx: 0, fl: { pluck: -9, bia: -9, vel: 0 }, msg: "ready: K2 to play", msgT: 0, k1: false, voice: null, biaS: null, secIdx: 0, secStart: 0, pieceT0: 0, endAt: 0, events: [] };
+  },
+  mount(el) {
+    el.innerHTML = '<button class="btn" id="mSound" aria-pressed="true" title="Hear a simple pluck + drum voice in the browser">Sound on</button><button class="btn" id="mSpeed" title="Fast-forward the piece">Speed 1×</button>';
+    // sound is on from the start; browsers only allow audio after a click or key
+    // press, so the first one anywhere on the page switches it on (unlockSound)
+    if (!window.__soundUnlock) {
+      window.__soundUnlock = true;
+      const unlock = () => {
+        if (!sim || !sim.ex || !sim.ex.applySound || !sim.sound) return;
+        if (!audioCtx()) return;
+        sim.ex.applySound();
+        ["pointerdown", "keydown"].forEach(t => document.removeEventListener(t, unlock, true));
+      };
+      ["pointerdown", "keydown"].forEach(t => document.addEventListener(t, unlock, true));
+    }
+    $("mSound").onclick = () => { sim.sound = !sim.sound; if (sim.sound && !audioCtx()) { sim.sound = false; toast("This browser can't play sound here"); }
+      if (sim.sound) this.applySound(); $("mSound").textContent = sim.sound ? "Sound on" : "Sound off"; $("mSound").setAttribute("aria-pressed", String(sim.sound)); };
+    $("mSpeed").onclick = () => { sim.speed = sim.speed === 1 ? 8 : 1; $("mSpeed").textContent = `Speed ${sim.speed}×`; };
+  },
+  applySound() { audioFx(); updateFx(this.ladderNow() / 10, sim.bpm, sim.t * sim.bpm / 60); applyLevels(); },
+  say(text) { sim.msg = text; sim.msgT = sim.t; },
+  ladderNow() { const L = sim.ladder, t = sim.t; if (L.dur <= 0 || t >= L.t0 + L.dur) return L.to; return L.from + (L.to - L.from) * (t - L.t0) / L.dur; },
+  setLadder(v, dur) { sim.ladder = { from: this.ladderNow(), to: v, t0: sim.t, dur }; },
+  lenSec(i) { return sim.lens[i] * 60; },
+  // events are handled on screen refreshes, which land a few ms after the beat.
+  // Sound is scheduled at the event's exact time plus a fixed delay, so every
+  // note keeps the same offset and the rhythm stays even
+  audioAt(at) {
+    if (!actx) return 0;
+    const est = actx.currentTime + 0.06 - (sim.t - at) / sim.speed;
+    // anchor sim time to the audio clock once, then keep exact spacing; re-anchor
+    // only if they drift apart (tab in the background, speed change)
+    const A = sim.anchor;
+    if (!A || sim.speed !== 1 || Math.abs(A.aud + (at - A.sim) - est) > 0.03) sim.anchor = { sim: at, aud: est };
+    return sim.anchor.aud + (at - sim.anchor.sim);
+  },
+  pluck(vel, at = sim.t) {
+    vel = clamp(vel, 0.5, 10); sim.fl.pluck = at; sim.fl.vel = vel;
+    if (sim.sound && sim.speed === 1) {
+      const hz = 110 * Math.pow(2, sim.pitch), when = this.audioAt(at);
+      const voice = M_WATER_SOUNDS[sim.el[2] - 1];   // Water: the melody sound (none when off)
+      if (voice) playMelody(voice, hz, vel / 10, this.ladderNow() / 10, when);
+      if (sim.el[3] === 4) playMelody("wind", hz, vel / 10, this.ladderNow() / 10, when);   // Air high: pitched wind
+      else if (sim.el[3] > 1) playMelody("shh", hz, vel / 10, this.ladderNow() / 10, when);   // Air low / medium: only the airy shh
+    }
+  },
+  trig(at = sim.t) {   // Earth: the drum sound (none when off); the conga is tuned to the root, 110 Hz
+    sim.fl.bia = at; const d = M_EARTH_DRUMS[sim.el[1] - 1];
+    if (d && sim.sound && sim.speed === 1) playDrum(d, this.audioAt(at), 110);
+  },
+  beginSection(i, at) {
+    if (i >= M_SECTIONS.length) {
+      sim.phase = "ending"; sim.now = "ending"; sim.playing = 0; sim.voice = null; sim.biaS = null;
+      this.say(`fading to silence over ${sim.endFade} s`); this.setLadder(0, sim.endFade); sim.endAt = at + sim.endFade; return;
+    }
+    const s = M_SECTIONS[i];
+    sim.secIdx = i; sim.secStart = at; sim.now = s.name; sim.playing = i + 1;
+    this.say(`section ${i + 1}: ${s.name} (${this.lenSec(i)} s)`);
+    this.setLadder(s.ladder, sim.ladderRise);
+    sim.voice = { t0: at, slow: 1, n: 0, next: at, fresh: true };
+    sim.biaS = { i: 0, next: at };   // every section runs the drum grid; Fire picks the pattern (or none)
+    // outro (same as OUTRO_BARS / OUTRO_HALF_BARS in meander.lua): the drum stops for
+    // the last M_OUTRO_BARS bars; the last M_OUTRO_HALF play the melody at half time.
+    // The ladder is untouched
+    sim.outroAt = null; sim.halfAt = null; sim.inOutro = false; sim.inHalf = false;
+    if (i === M_SECTIONS.length - 1) {
+      const barS = 4 * 60 / sim.bpm, bars = Math.floor(this.lenSec(i) / barS);
+      const ob = Math.min(M_OUTRO_BARS, bars), hb = Math.min(M_OUTRO_HALF, ob);
+      sim.outroAt = at + (bars - ob) * barS;
+      sim.halfAt = at + (bars - hb) * barS;
+    }
+  },
+  startOutro() { sim.inOutro = true; sim.now = "outro"; sim.biaS = null; this.say("outro: no drum"); },
+  startHalfTime(at) {
+    sim.inHalf = true;
+    sim.voice = { t0: at, slow: 2, n: 0, next: at };
+    this.say("outro: half time");
+  },
+  // Fire picks whose rhythm and notes each section plays (voice in meander.lua); read
+  // every step, counted from the voice's first bar line. Off: one note per bar, on beat 1
+  stepVoice(at) {
+    const s = M_SECTIONS[sim.secIdx], v = sim.voice, fireLvl = sim.el[0], beat = 60 / sim.bpm;
+    const rs = M_FIRE_RHYTHMS[fireLvl - 1], q = rs ? M_SECTIONS[rs[sim.secIdx]].seq : M_EVERY_BAR;
+    const divS = q.div * v.slow * beat, pat = mEuclid(q.hits, q.steps, q.rotate);
+    const k = Math.floor((at - v.t0) / divS + 0.001), i = k % pat.length;
+    v.next = v.t0 + (k + 1) * divS;   // the next step on this rhythm's grid
+    if (pat[i]) {
+      // every 16 bars of the section (REROLL_BARS), the notes it's playing are replaced
+      const srcS = M_SECTIONS[M_FIRE_NOTES[fireLvl - 1][sim.secIdx]];
+      if (v.fresh) { v.fresh = false; if (M_FIRE_NOTES[fireLvl - 1][sim.secIdx] !== sim.secIdx) v.block = -1; }   // borrowed notes: new ones now
+      const blk = Math.floor((at - v.t0) / (4 * beat) / 16 + 0.001);
+      if (blk > (v.block ?? 0)) { v.block = blk; v.n = 0; srcS.notes = this.inventNotes(srcS); }
+      const notes = srcS.notes;
+      let p = sim.octave + mStepVolts(notes[v.n % notes.length], M_SCALES[sim.scaleIdx][1]);
+      if (Math.random() < s.leap) p += 1;
+      v.n = (v.n + 1) % notes.length;
+      sim.pitch = p;
+      let vel = s.vel[0] + Math.random() * (s.vel[1] - s.vel[0]);
+      if (i === 0) vel += s.accent;
+      this.pluck(vel, at);
+    }
+  },
+  inventNotes(s) {   // 8 new notes in the section's register, each leaping >= 2 steps (invent_melody in meander.lua)
+    const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+    const [low, range] = { Wake: [0, 6], Nourish: [2, 7], Meander: [4, 9] }[s.name], notes = []; let prev = null;
+    for (let i = 0; i < 8; i++) { let d; do d = low + rnd(0, range); while (prev !== null && Math.abs(d - prev) < 2); notes.push(d); prev = d; }
+    return notes;
+  },
+  randomizeRhythms() {   // new melody rhythms every start (randomize_rhythms in meander.lua)
+    const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+    // one rhythm: Meander's speed, Nourish at half speed, Wake at half Nourish's
+    const m = { hits: rnd(3, 6), steps: 8, rotate: rnd(0, 7) };
+    const made = { Wake: m, Nourish: m, Meander: m };
+    M_SECTIONS.forEach(s => {
+      const r = made[s.name]; s.seq = { hits: r.hits, steps: r.steps, div: s.seq.div, rotate: r.rotate };
+      s.notes = this.inventNotes(s);
+    });
+    this.say(`rhythm: ${m.hits}/8`);
+  },
+  start() { this.randomizeRhythms(); sim.running = true; sim.phase = "sections"; sim.pieceT0 = sim.t; this.beginSection(0, sim.t); },
+  stop() { sim.running = false; sim.phase = null; sim.voice = null; sim.biaS = null; this.setLadder(0, sim.stopFade); sim.now = "stopped"; sim.playing = 0; this.say("stopped"); },
+  testBia() { const t = sim.t; this.say("test BIA: 4 hits"); for (let k = 0; k < 4; k++) sim.events.push({ at: t + k * 0.5, fn: (at) => this.trig(at) }); },
+  tick(dt) {
+    sim.t += dt * sim.speed; const t = sim.t;
+    if (sim.sound && fx && now() - fxLastUpdate > 0.1) { fxLastUpdate = now(); updateFx(this.ladderNow() / 10, sim.bpm, sim.t * sim.bpm / 60); }
+    sim.events = sim.events.filter(e => { if (e.at <= t) { e.fn(e.at); return false; } return true; });
+    if (!sim.running) return;
+    if (sim.phase === "sections") {
+      const s = M_SECTIONS[sim.secIdx], beat = 60 / sim.bpm;
+      if (sim.outroAt != null && !sim.inOutro && t >= sim.outroAt) this.startOutro();
+      if (sim.halfAt != null && !sim.inHalf && t >= sim.halfAt) this.startHalfTime(sim.halfAt);
+      let guard = 0;
+      const endS = sim.secStart + this.lenSec(sim.secIdx);   // nothing plays at or after the section's end
+      while (sim.voice && sim.voice.next <= t && sim.voice.next < endS - 1e-6 && guard++ < 64) { this.stepVoice(sim.voice.next); }
+      while (sim.biaS && sim.biaS.next <= t && sim.biaS.next < endS - 1e-6 && guard++ < 128) { const ds = M_SECTIONS[M_FIRE_DRUMS[sim.el[0] - 1][sim.secIdx]].bia;   // Fire picks whose drum pattern (FIRE_DRUMS), or none
+        if (ds && mEuclid(ds.hits, ds.steps, ds.rotate)[sim.biaS.i % ds.steps]) this.trig(sim.biaS.next); sim.biaS.i = (sim.biaS.i + 1) % 16; sim.biaS.next += 0.25 * beat; }
+      if (t >= endS) this.beginSection(sim.secIdx + 1, endS);
+    } else if (sim.phase === "ending" && t >= sim.endAt) {
+      sim.running = false; sim.phase = null; sim.now = "ended"; sim.pitch = 0; this.say("silent");
+    }
+  },
+  key(n, z) {
+    if (n === 1) { sim.k1 = z === 1; return; }
+    if (z !== 1) return;
+    if (n === 2) { if (sim.page === "elements") this.cycleElement(sim.elSel); else sim.running ? this.stop() : this.start(); }
+    if (n === 3) { if (sim.k1) this.testBia(); else { const P = ["visual", "elements", "setup"]; sim.page = P[(P.indexOf(sim.page) + 1) % P.length]; } }
+  },
+  cycleElement(i) {
+    const d0 = (sim.elDir || (sim.elDir = [-1, -1, -1, -1]))[i];   // bounce: high -> medium -> low -> off -> low -> ...
+    const d = (sim.el[i] + d0 < 1 || sim.el[i] + d0 > 4) ? -d0 : d0;
+    sim.elDir[i] = d; sim.el[i] += d;
+    this.say(`${M_ELEMENTS[i][0]}: ${M_ELEMENTS[i][1][sim.el[i] - 1]}`);
+  },
+  gridKey(x, y, z) { if (z === 1 && y === 1 && x <= 4) this.cycleElement(x - 1); },
+  enc(n, d) {
+    if (sim.page === "elements") { if (n === 2) sim.elSel = clamp(sim.elSel + d, 0, 3); return; }
+    if (sim.page !== "setup") return;   // encoders edit on the setup page
+    // E1: song length 3-60 min, split into three equal sections
+    if (n === 1) { sim.totalMin = clamp((sim.totalMin || 3) + d, 3, 60); sim.lens = [0, 1, 2].map(() => sim.totalMin / 3); }
+    if (n === 2) sim.scaleIdx = clamp(sim.scaleIdx + d, 0, M_SCALES.length - 1);
+  },
+  // grid bottom row: same as section_columns / playhead_column in meander.lua
+  sectionColumns(cols) {
+    const lens = sim.lens.map(m => m * 60), total = lens.reduce((a, b) => a + b, 0);
+    const counts = [], rem = []; let used = 0;
+    lens.forEach((L, i) => { const ex = cols * L / total; counts[i] = Math.max(1, Math.floor(ex)); rem[i] = ex - Math.floor(ex); used += counts[i]; });
+    while (used < cols) { let b = 0; for (let i = 1; i < 3; i++) if (rem[i] > rem[b]) b = i; counts[b]++; rem[b] = -1; used++; }
+    while (used > cols) { let b = 0; for (let i = 1; i < 3; i++) if (counts[i] > counts[b]) b = i; counts[b]--; used--; }
+    const map = []; counts.forEach((c, i) => { for (let k = 0; k < c; k++) map.push(i + 1); });
+    return map;
+  },
+  visSeg() {   // the visualizer's segment (playhead_segment in meander.lua): 1-3 Wake, 4-6 Nourish, 7-9 Meander, 10 outro
+    if (!(sim.playing > 0)) return null;
+    const first = (sim.playing - 1) * 3 + 1;
+    let len = this.lenSec(sim.playing - 1);
+    if (sim.playing === M_SECTIONS.length) {
+      if (sim.outroAt == null || sim.t >= sim.outroAt) return 10;
+      len = sim.outroAt - sim.secStart;
+      if (len <= 0) return 10;
+    }
+    return first + clamp(Math.floor((sim.t - sim.secStart) / len * 3), 0, 2);
+  },
+  playCol(cols = 16) {   // the playhead's column on a timeline of cols columns, or null
+    if (!(sim.playing > 0)) return null;
+    const map = this.sectionColumns(cols);
+    const first = map.indexOf(sim.playing) + 1, last = map.lastIndexOf(sim.playing) + 1;
+    const frac = (sim.t - sim.secStart) / this.lenSec(sim.playing - 1);
+    return clamp(first + Math.floor(frac * (last - first + 1)), first, last);
+  },
+  gridLevel(x, y) {
+    if (y === 1) return x <= 4 ? M_LEDS[sim.el[x - 1] - 1] : 0;   // element buttons
+    if (y !== 8) return 0;
+    const map = this.sectionColumns(16), lv = [3, 8, 13][map[x - 1] - 1];
+    const col = this.playCol();
+    if (col) {
+      // FLASH_RATE 0.5: one flash every 2 beats, lit for the first beat
+      if (x === col) return ((sim.t - sim.pieceT0) * sim.bpm / 60) % 2 < 1 ? 15 : 0;
+    }
+    return lv;
+  },
+  crowOut(i) {
+    const t = sim.t;
+    if (i === 0) return sim.pitch;
+    if (i === 1) return t - sim.fl.bia < 0.06 ? 8 : 0;
+    if (i === 2) return t - sim.fl.pluck < 0.05 ? sim.fl.vel : 0;
+    return this.ladderNow();
+  },
+  objs() {
+    const o = [], T = (text, x, y, level, align = "left") => o.push({ type: "text", text: String(text), x, y, size: 8, align, level });
+    const R = (x, y, w, h, level, fill = true) => o.push({ type: "rect", x, y, w, h, level, fill });
+    if (sim.page === "elements") {   // four buttons, lit off / medium / high; E2 selects, K2 cycles
+      T("ELEMENTS", 0, 7, 15);
+      M_ELEMENTS.forEach(([name], i) => {
+        const x = i * 32 + 6, lvl = sim.el[i];
+        R(x, 14, 20, 20, M_LEDS[lvl - 1]);
+        if (i === sim.elSel) R(x - 3, 11, 26, 26, 15, false);
+        T(name.toUpperCase(), x + 10, 46, i === sim.elSel ? 15 : 6, "center");
+        T(M_SHORT[lvl - 1], x + 10, 55, 4, "center");
+      });
+      T(sim.msg && sim.t - sim.msgT < 4 ? sim.msg.toUpperCase() : "E2 SELECT  K2 SET  K3 PAGE", 0, 63, 3);
+      return o;
+    }
+    if (sim.page === "visual") {   // visualizer: 10 segments (VIS_MAP): 1-3 Wake, 4-6 Nourish, 7-9 Meander, 10 outro
+      // while playing, the columns undulate in a wave at 1/16 of the tempo, left to right
+      // (WAVE_RATE, WAVE_HEIGHT, WAVE_LENGTH in meander.lua); it eases in and settles flat
+      const nowR = performance.now() / 1000, dt = Math.min(0.25, nowR - (sim.waveT || nowR)); sim.waveT = nowR;
+      sim.waveAmp = (sim.waveAmp || 0) + ((sim.running ? 1 : 0) - (sim.waveAmp || 0)) * Math.min(1, dt * 1.6);
+      const beats = sim.t * sim.bpm / 60;
+      // height follows the ladder, and shrinks steadily to zero across the outro
+      let outroFade = 1;
+      if (sim.outroAt != null && sim.t >= sim.outroAt) {
+        const endS = sim.secStart + this.lenSec(sim.secIdx);
+        outroFade = clamp((endS - sim.t) / Math.max(0.001, endS - sim.outroAt), 0, 1);
+      }
+      const height = 8 * sim.waveAmp * (this.ladderNow() / 10) * outroFade;
+      // tallest at the current segment, tapering either side to a point (WAVE_SPREAD 2.5)
+      const VC = 10, vmap = [1, 1, 1, 2, 2, 2, 3, 3, 3, 3], col = this.visSeg();   // segment 10 is the outro
+      const flashOn = (beats % 2) < 1;   // FLASH_RATE: one flash every 2 beats
+      if (col) sim.waveCenter = sim.waveCenter == null ? col : sim.waveCenter + (col - sim.waveCenter) * Math.min(1, dt * 1.6);
+      for (let x = 1; x <= VC; x++) {
+        const bell = sim.waveCenter == null ? 0 : Math.exp(-Math.abs(x - sim.waveCenter) / 2.5);
+        const dy = Math.round(height * bell * Math.sin(2 * Math.PI * (beats / 16 - (x - 1) / VC)));
+        const left = Math.floor((x - 1) * 128 / VC + 0.5), right = Math.floor(x * 128 / VC + 0.5);
+        let lv = x === col ? (flashOn ? 15 : 0) : [3, 8, 13][vmap[x - 1] - 1];
+        // outro segment: dark until the outro, then flashing at high (OUTRO_LEVEL 13), fading to dark
+        if (x === VC) lv = sim.outroAt != null && sim.t >= sim.outroAt && flashOn ? Math.round(13 * outroFade) : 0;
+        R(left + 1, 22 - dy, right - left - 2, 20, lv);
+      }
+      return o;
+    }
+    T("MEANDER", 0, 7, 15);
+    if (sim.playing > 0) T(`${sim.now.toUpperCase()}  ${mmss(sim.t - sim.pieceT0)}`, 128, 7, 15, "right");
+    else T(sim.now.toUpperCase(), 128, 7, 4, "right");
+    const total = sim.lens.reduce((a, b) => a + b, 0) * 60;
+    let x = 0;
+    M_SECTIONS.forEach((s, i) => {
+      let w = Math.max(3, Math.round(128 * this.lenSec(i) / total));
+      if (i === M_SECTIONS.length - 1) w = 128 - x;
+      R(x + 1, 13, w - 2, 8, i + 1 === sim.playing ? 10 : 3);
+      x += w;
+    });
+    if (sim.playing > 0) R(clamp(Math.floor(128 * (sim.t - sim.pieceT0) / total), 0, 127), 10, 1, 14, 15);
+    const rows = [["LENGTH", `${sim.totalMin || 3} MIN  ${mmss(this.lenSec(0))} EACH`], ["SCALE", M_SCALES[sim.scaleIdx][0].toUpperCase()]];
+    rows.forEach(([label, val], i) => { T(`E${i + 1} ${label}`, 0, 30 + i * 8, 5); T(val, 128, 30 + i * 8, 15, "right"); });
+    const fade = (t0, dur) => { const age = sim.t - t0; return age > dur ? 1 : Math.floor(15 - 13 * age / dur); };
+    const meters = [["PCH", clamp(Math.floor(sim.pitch * 3), 1, 15)], ["BIA", fade(sim.fl.bia, 0.25)],
+      ["PLK", Math.min(fade(sim.fl.pluck, 0.4), Math.floor(sim.fl.vel * 1.5))], ["LAD", clamp(Math.floor(this.ladderNow() * 1.5), 1, 15)]];
+    meters.forEach(([label, l], i) => { R(i * 32, 49, 7, 6, Math.max(1, l)); T(label, i * 32 + 10, 55, 4); });
+    T(sim.msg && sim.t - sim.msgT < 4 ? sim.msg.toUpperCase() : (sim.running ? "K2 STOP  K3 PAGE" : "K2 PLAY  K3 PAGE"), 0, 63, 3);
+    return o;
+  }
+};
+
+
+/* ===== phone shell ===== */
+sim = Object.assign(EX_MEANDER.init(), { ex: EX_MEANDER });
+const ex = EX_MEANDER;
+
+// screen
+const cv = $("cv"), ctx = cv.getContext("2d"), S = cv.width / W;
+const oled = []; const oledColor = (l) => oled[l] || (oled[l] = `rgba(232,240,255,${(0.08 + 0.92 * l / 15).toFixed(3)})`);
+function render() {
+  const buf = rasterize(ex.objs());
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, cv.width, cv.height);
+  for (let i = 0; i < W * H; i++) { const l = buf[i]; if (!l) continue; ctx.fillStyle = oledColor(l); ctx.fillRect((i % W) * S, ((i / W) | 0) * S, S, S); }
+}
+
+// help line follows the page
+function help() {
+  const p = sim.page;
+  $("help").innerHTML = p === "visual"
+    ? "<b>K2</b> play / stop · <b>K3</b> next page · hold <b>K1</b> + tap <b>K3</b> to test the kick"
+    : p === "elements"
+    ? "<b>E2</b> pick · <b>K2</b> step its level · <b>fire</b> notes · <b>earth</b> drum · <b>water</b> melody sound · <b>air</b> wind"
+    : "<b>E1</b> song length · <b>E2</b> scale · <b>K2</b> play / stop · <b>K3</b> next page";
+}
+
+// sound
+function setSound(on) {
+  sim.sound = on && !!actx;
+  if (sim.sound) { audioCtx(); audioFx(); updateFx(ex.ladderNow() / 10, sim.bpm, sim.t * sim.bpm / 60); applyLevels(); }
+  $("btnSound").textContent = sim.sound ? "Sound on" : "Sound off";
+  $("btnSound").setAttribute("aria-pressed", String(sim.sound));
+}
+function unlockAudio() {
+  // iOS 17+: play through the silent switch, like a music app
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+  const a = audioCtx(); if (!a) return false;
+  const b = a.createBuffer(1, 1, a.sampleRate), s = a.createBufferSource(); s.buffer = b; s.connect(a.destination); s.start(0);
+  return true;
+}
+function lockLandscape() { try { screen.orientation && screen.orientation.lock && screen.orientation.lock("landscape").catch(() => {}); } catch (e) {} }
+$("btnStart").onclick = () => { lockLandscape(); const ok = unlockAudio(); $("start").hidden = true; setSound(ok); };
+$("btnQuiet").onclick = () => { lockLandscape(); $("start").hidden = true; setSound(false); };
+$("btnSound").onclick = () => { if (!actx) unlockAudio(); setSound(!sim.sound); };
+$("btnSpeed").onclick = () => {
+  sim.speed = sim.speed === 1 ? 8 : 1;
+  $("btnSpeed").textContent = sim.speed === 1 ? "Speed 1×" : "Speed 8× (silent)";
+  $("btnSpeed").setAttribute("aria-pressed", String(sim.speed !== 1));
+};
+document.addEventListener("visibilitychange", () => { if (!document.hidden && actx && actx.state !== "running") actx.resume().catch(() => {}); });
+
+// keys: press and release, so K1 can be held while K3 is tapped
+document.querySelectorAll(".key").forEach(el => {
+  const n = +el.dataset.key;
+  const down = (e) => { e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch (_) {} if (el.classList.contains("down")) return; el.classList.add("down"); ex.key(n, 1); help(); };
+  const up = () => { if (!el.classList.contains("down")) return; el.classList.remove("down"); ex.key(n, 0); };
+  el.addEventListener("pointerdown", down); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
+  el.addEventListener("contextmenu", (e) => e.preventDefault());
+});
+
+// encoders: turn by dragging around the knob (one step per 24°), or tap its left / right half
+const STEP_DEG = 24;
+document.querySelectorAll(".knob").forEach(el => {
+  const n = +el.dataset.enc, cap = el.querySelector("i");
+  let drag = null, angle = 0;
+  const center = () => { const r = cap.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+  const ang = (e, c) => Math.atan2(e.clientY - c[1], e.clientX - c[0]) * 180 / Math.PI;
+  el.addEventListener("pointerdown", (e) => {
+    e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch (_) {}
+    const c = center(); drag = { c, last: ang(e, c), acc: 0, x0: e.clientX, y0: e.clientY, moved: false };
+    el.classList.add("turning");
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 6) drag.moved = true;
+    if (Math.hypot(e.clientX - drag.c[0], e.clientY - drag.c[1]) < 12) return;   // too close to the centre to read an angle
+    const a = ang(e, drag.c); let d = a - drag.last; if (d > 180) d -= 360; if (d < -180) d += 360; drag.last = a;
+    angle += d; cap.style.transform = `rotate(${angle}deg)`;
+    drag.acc += d;
+    while (drag.acc >= STEP_DEG) { drag.acc -= STEP_DEG; ex.enc(n, 1); }
+    while (drag.acc <= -STEP_DEG) { drag.acc += STEP_DEG; ex.enc(n, -1); }
+  });
+  const end = (e) => {
+    if (!drag) return;
+    if (!drag.moved) {   // a tap: left half turns down, right half up
+      const turned = matchMedia("(orientation: portrait)").matches;   // the stage is turned 90°: its x runs down the screen
+      const d = (turned ? e.clientY < drag.c[1] : e.clientX < drag.c[0]) ? -1 : 1; ex.enc(n, d); angle += d * STEP_DEG; cap.style.transform = `rotate(${angle}deg)`;
+    }
+    drag = null; el.classList.remove("turning");
+  };
+  el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
+});
+
+// run
+let last = null;
+function frame() {
+  const t = now(), dt = last == null ? 0 : Math.min(0.25, t - last); last = t;
+  ex.tick(dt);
+  if (!document.hidden) render();
+  requestAnimationFrame(frame);
+}
+help(); render(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
